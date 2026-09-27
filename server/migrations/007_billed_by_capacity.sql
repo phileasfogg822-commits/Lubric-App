@@ -1,0 +1,11 @@
+-- Whether a product line was billed pro-rata by the engine's oil capacity.
+--
+-- A 4L bottle @ 4000 poured into a 3.5L engine:
+--   billed_by_capacity = true  -> customer pays 3.5/4 x 4000 = 3500
+--   billed_by_capacity = false -> customer pays the full 4000
+--
+-- Untouched by this flag: leftover_litres / leftover_to still record where the
+-- unused oil ended up (containers shelf or handed to the customer).
+--
+-- Idempotent: migrate.js replays every .sql file on each boot.
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS billed_by_capacity BOOLEAN DEFAULT FALSE;

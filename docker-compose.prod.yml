@@ -1,0 +1,88 @@
+# ─── LubricApp — Production VPS stack ────────────────────────────────────────
+# Deploy:   docker compose -f docker-compose.prod.yml up -d --build
+# Teardown: docker compose -f docker-compose.prod.yml down
+# Logs:     docker compose -f docker-compose.prod.yml logs -f api
+#
+# Topology:  internet → caddy (auto-TLS) → api → postgres (internal only)
+# Backups:   nightly pg_dump → ./backups on the host (7-day rotation)
+
+services:
+  # PostgreSQL — NOT published to the host; only the api container reaches it.
+  db:
+    image: postgres:15-alpine
+    container_name: lubric-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-lubricapp}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-lubricapp}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Express API — migrations run on every start (idempotent SQL files).
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: lubric-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-lubricapp}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "node migrate.js && node index.js"
+
+  # Nightly logical backup at 02:30 UTC, 7-day rotation into ./backups on host.
+  backup:
+    image: postgres:15-alpine
+    container_name: lubric-backup
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command: >
+      -c 'while true; do
+            ts=$$(date -u +%Y%m%d-%H%M);
+            pg_dump -h db -U ${DB_USER:-postgres} -d ${DB_NAME:-lubricapp} -Fc
+              -f /backups/lubricapp-$$ts.dump && echo "backup ok $$ts";
+            ls -1t /backups/lubricapp-*.dump | tail -n +8 | xargs -r rm -f;
+            sleep 86400;
+          done'
+
+  # Caddy — public entrypoint; automatic Let's Encrypt TLS for your domain.
+  caddy:
+    image: caddy:2-alpine
+    container_name: lubric-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

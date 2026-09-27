@@ -1,0 +1,12 @@
+{
+  "appId": "app.lubric.field",
+  "appName": "Lubric Field",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  }
+}

@@ -1,0 +1,97 @@
+:root {
+  --blue: #1e40af;
+  --bg: #f1f5f9;
+  --card: #ffffff;
+  --ink: #0f172a;
+  --muted: #64748b;
+  --green: #16a34a;
+  --red: #dc2626;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root { height: 100%; }
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-tap-highlight-color: transparent;
+}
+.app { display: flex; flex-direction: column; height: 100%; }
+.center { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; }
+.pad { padding: 16px; padding-bottom: 96px; }
+
+.topbar {
+  display: flex; justify-content: space-between; align-items: center;
+  background: #0f172a; color: white; padding: 12px 16px;
+  padding-top: calc(12px + env(safe-area-inset-top));
+}
+.brand { font-weight: 800; letter-spacing: 0.08em; font-size: 0.85rem; }
+.ghost {
+  background: rgba(255,255,255,0.12); color: white; border: none;
+  border-radius: 8px; padding: 7px 12px; font-size: 0.8rem; font-weight: 600;
+}
+.syncmsg {
+  background: #dbeafe; color: #1e40af; font-size: 0.78rem;
+  padding: 6px 16px; text-align: center;
+}
+.content { flex: 1; overflow: auto; }
+
+.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.card {
+  background: var(--card); border-radius: 14px; padding: 14px;
+  border: 1px solid #e2e8f0;
+}
+.card.green { border-left: 4px solid var(--green); }
+.card.red { border-left: 4px solid var(--red); }
+.card.blue { border-left: 4px solid var(--blue); margin-bottom: 6px; }
+.lbl2 { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.big { font-size: 1.25rem; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+.h2 { font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 18px 0 6px; }
+.row {
+  display: flex; justify-content: space-between; gap: 10px;
+  background: var(--card); border: 1px solid #e2e8f0; border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 6px;
+}
+.rowtitle { font-weight: 600; font-size: 0.9rem; }
+.sub { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+.amt { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.green2 { color: var(--green); }
+.red2 { color: var(--red); }
+.pend { color: #d97706; font-size: 0.7rem; }
+.empty { font-size: 0.8rem; color: var(--muted); padding: 8px 0; }
+
+.lbl { display: block; font-size: 0.75rem; font-weight: 600; color: var(--muted); margin: 12px 0 4px; }
+.inp {
+  width: 100%; padding: 12px; border: 1px solid #cbd5e1; border-radius: 10px;
+  font-size: 1rem; background: white;
+}
+.inp.big { font-size: 1.4rem; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
+.primary {
+  width: 100%; margin-top: 16px; background: var(--blue); color: white;
+  border: none; border-radius: 12px; padding: 14px; font-size: 1rem; font-weight: 700;
+}
+.primary:disabled { opacity: 0.5; }
+.seg { display: flex; gap: 6px; margin-bottom: 6px; }
+.segbtn {
+  flex: 1; padding: 11px 6px; border: 1px solid #cbd5e1; border-radius: 10px;
+  background: white; font-size: 0.85rem; font-weight: 600; color: var(--muted);
+}
+.segbtn.active { background: var(--blue); border-color: var(--blue); color: white; }
+.err { margin-top: 10px; color: var(--red); font-size: 0.8rem; }
+.ok { margin-top: 10px; color: var(--green); font-size: 0.85rem; font-weight: 600; }
+.hint { margin-top: 12px; font-size: 0.75rem; color: var(--muted); text-align: center; }
+.title { font-size: 1.3rem; font-weight: 800; letter-spacing: 0.06em; }
+code { background: #e2e8f0; padding: 1px 5px; border-radius: 4px; }
+
+.tabbar {
+  position: fixed; bottom: 0; left: 0; right: 0; display: flex;
+  background: white; border-top: 1px solid #e2e8f0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.tab {
+  flex: 1; background: none; border: none; padding: 10px 0 8px;
+  font-size: 0.7rem; font-weight: 600; color: var(--muted);
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.tab.active { color: var(--blue); }
+.ic { font-size: 1.15rem; }

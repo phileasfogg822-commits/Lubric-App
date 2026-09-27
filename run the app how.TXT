@@ -1,0 +1,37 @@
+Lubric POS - How to Run
+=========================
+
+=== DOCKER DEVELOPMENT MODE (Recommended) ===
+
+Quick start:
+  docker compose up -d
+
+Then open: http://localhost:5173
+
+Login:
+  Admin:    admin@lubric.app / admin123
+  Cashier:  cashier@lubric.app / cashier123
+
+Other commands:
+  npm run docker:up      # Start all services
+  npm run docker:down    # Stop all services
+  npm run docker:logs    # View live logs
+  npm run docker:build   # Rebuild containers
+
+Services:
+  Frontend  → http://localhost:5173 (React + Vite, hot reload)
+  Backend   → http://localhost:3001 (Express API, hot reload)
+  Database  → localhost:5432 (PostgreSQL)
+
+=== LOCAL DEVELOPMENT (without Docker) ===
+
+1. Start PostgreSQL and create a database named 'lubricapp'
+2. In /server folder: npm install && node migrate.js && npm run dev
+3. In project root: npm install && npm run dev
+4. Open http://localhost:5173
+
+=== DESKTOP BUILD (when ready for distribution) ===
+
+  npm run tauri:build    # Creates Windows installer
+
+See DOCKER_README.md for more details.

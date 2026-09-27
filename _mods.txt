@@ -1,0 +1,13 @@
+﻿accounts/Accounts.tsx
+auth/Login.tsx
+catalog/Catalog.tsx
+customers/Customers.tsx
+dashboard/Dashboard.tsx
+expenses/Expenses.tsx
+inspections/Inspections.tsx
+purchase/Purchase.tsx
+reports/Reports.tsx
+sales/SalesHistory.tsx
+shop/Shop.tsx
+team/Team.tsx
+vendors/Vendors.tsx

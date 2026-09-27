@@ -1,0 +1,6 @@
+# Caddy reverse proxy with automatic HTTPS (Let's Encrypt).
+# Replace api.yourdomain.com with your real DNS name before deploying.
+api.yourdomain.com {
+	encode gzip
+	reverse_proxy api:3001
+}

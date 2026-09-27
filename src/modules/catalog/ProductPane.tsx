@@ -1,0 +1,196 @@
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { dbSelect, dbExecute } from "../../lib/db";
+import { Modal } from "../../components/Modal";
+import { FormField } from "../../components/FormField";
+import { EmptyState } from "../../components/EmptyState";
+import { cardParts, type Column } from "./columns";
+import { Pane } from "./Pane";
+import EntityTable from "./EntityTable";
+import EntityGrid from "./EntityGrid";
+import type { Density, ViewMode } from "./prefs";
+
+const EMPTY = {
+  name: "", category_id: "", brand_id: "", vendor_id: "", variant: "", packing: "", unit: "piece",
+  mfd_date: "", exp_date: "", received_date: "", offer: "",
+  price_returning: "", price_walking: "", price_wholesale: "",
+  wholesale_min_qty: "10", stock_qty: "0", low_stock_threshold: "5",
+};
+
+interface Props {
+  view: ViewMode;
+  density: Density;
+  columns: Column[];
+  search: string;
+  compact: boolean;
+  onViewAll?: () => void;
+}
+
+export default function ProductPane({ view, density, columns, search, compact, onViewAll }: Props) {
+  const qc = useQueryClient();
+  const [show, setShow] = useState(false);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [form, setForm] = useState({ ...EMPTY });
+
+  const { data: categories } = useQuery({ queryKey: ["categories"], queryFn: () => dbSelect<any>("SELECT id, name FROM categories ORDER BY name") });
+  const { data: brands } = useQuery({ queryKey: ["brands"], queryFn: () => dbSelect<any>("SELECT id, name FROM brands ORDER BY name") });
+  const { data: vendors } = useQuery({ queryKey: ["vendors_list"], queryFn: () => dbSelect<any>("SELECT id, name FROM vendors ORDER BY name") });
+
+  const { data: rows, isLoading } = useQuery({
+    queryKey: ["catalog_products", search],
+    queryFn: () => {
+      let sql = `SELECT p.*, c.name as category_name, b.name as brand_name, v.name as vendor_name
+                 FROM products p
+                 LEFT JOIN categories c ON p.category_id = c.id
+                 LEFT JOIN brands b ON p.brand_id = b.id
+                 LEFT JOIN vendors v ON p.vendor_id = v.id`;
+      const params: any[] = [];
+      if (search) {
+        params.push(`%${search}%`);
+        sql += ` WHERE p.name ILIKE $1 OR p.sku ILIKE $1 OR p.barcode ILIKE $1`;
+      }
+      return dbSelect<any>(sql + " ORDER BY p.name", params);
+    },
+  });
+
+  function close() { setShow(false); setEditId(null); setForm({ ...EMPTY }); }
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const values: any[] = [
+        form.name.trim(),
+        form.category_id ? parseInt(form.category_id) : null,
+        form.brand_id ? parseInt(form.brand_id) : null,
+        form.vendor_id ? parseInt(form.vendor_id) : null,
+        form.variant || null,
+        form.packing || null,
+        form.unit || "piece",
+        form.mfd_date || null,
+        form.exp_date || null,
+        form.received_date || null,
+        form.offer || null,
+        parseFloat(form.stock_qty || "0"),
+        parseFloat(form.low_stock_threshold || "5"),
+        parseFloat(form.price_returning || "0"),
+        form.price_walking === "" ? null : parseFloat(form.price_walking),
+        parseFloat(form.price_wholesale || "0"),
+        parseFloat(form.wholesale_min_qty || "10"),
+      ];
+      if (editId) {
+        await dbExecute(
+          `UPDATE products SET name=$1, category_id=$2, brand_id=$3, vendor_id=$4, variant=$5, packing=$6,
+             unit=$7, mfd_date=$8, exp_date=$9, received_date=$10, offer=$11, stock_qty=$12,
+             low_stock_threshold=$13, price_returning=$14, price_walking=$15, price_wholesale=$16,
+             wholesale_min_qty=$17 WHERE id=$18`,
+          [...values, editId]
+        );
+      } else {
+        await dbExecute(
+          `INSERT INTO products (name, category_id, brand_id, vendor_id, variant, packing, unit,
+             mfd_date, exp_date, received_date, offer, stock_qty, low_stock_threshold,
+             price_returning, price_walking, price_wholesale, wholesale_min_qty, active)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,1)`,
+          values
+        );
+      }
+    },
+    onSuccess: () => { qc.invalidateQueries(); close(); },
+    onError: (e: any) => alert("Error saving product: " + (e?.message || e)),
+  });
+
+  const toggle = useMutation({
+    mutationFn: async (r: any) => { await dbExecute("UPDATE products SET active=$1 WHERE id=$2", [r.active ? 0 : 1, r.id]); },
+    onSuccess: () => qc.invalidateQueries(),
+  });
+
+  function openAdd() { setEditId(null); setForm({ ...EMPTY }); setShow(true); }
+
+  function openEdit(p: any) {
+    setEditId(p.id);
+    setForm({
+      name: p.name ?? "", category_id: p.category_id?.toString() ?? "", brand_id: p.brand_id?.toString() ?? "",
+      vendor_id: p.vendor_id?.toString() ?? "", variant: p.variant ?? "", packing: p.packing ?? "",
+      unit: p.unit ?? "piece", mfd_date: p.mfd_date ?? "", exp_date: p.exp_date ?? "",
+      received_date: p.received_date ?? "", offer: p.offer ?? "",
+      price_returning: p.price_returning?.toString() ?? "",
+      price_walking: p.price_walking == null ? "" : p.price_walking.toString(),
+      price_wholesale: p.price_wholesale?.toString() ?? "",
+      wholesale_min_qty: p.wholesale_min_qty?.toString() ?? "10",
+      stock_qty: (p.stock_qty ?? 0).toString(), low_stock_threshold: (p.low_stock_threshold ?? 5).toString(),
+    });
+    setShow(true);
+  }
+  const all = rows ?? [];
+  const shown = compact ? all.slice(0, 6) : all;
+  const { title, cards } = cardParts("products", columns);
+
+  const rowActions = (r: any) => (
+    <>
+      <button className="btn btn-ghost btn-sm" onClick={() => openEdit(r)}>Edit</button>
+      <button className="btn btn-ghost btn-sm" onClick={() => toggle.mutate(r)}>{r.active ? "Hide" : "Show"}</button>
+    </>
+  );
+
+  return (
+    <Pane
+      icon="◈" label="Products" count={all.length}
+      tools={compact && all.length > 6 && onViewAll ? <button className="btn btn-ghost btn-sm" onClick={onViewAll}>View all →</button> : undefined}
+      action={<button className="btn btn-primary btn-sm" onClick={openAdd}>+ Add Product</button>}
+    >
+      {view === "grid" ? (
+        <EntityGrid title={title} columns={cards} rows={shown} density={density} loading={isLoading}
+          actions={rowActions} isDimmed={(r) => !r.active}
+          empty={<EmptyState title="No products" message="Add your first product" />} />
+      ) : (
+        <EntityTable columns={columns} rows={shown} density={density} loading={isLoading}
+          actions={rowActions} actionsLabel="Actions" isDimmed={(r) => !r.active}
+          empty={<EmptyState title="No products" message="Add your first product" />} />
+      )}
+
+      {show && (
+        <Modal title={editId ? "Edit Product" : "Add Product"} onClose={close} wide>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <FormField label="Name *"><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></FormField>
+            <FormField label="Packing"><input className="input" placeholder="4L / 1kg / 1pc" value={form.packing} onChange={(e) => setForm({ ...form, packing: e.target.value })} /></FormField>
+            <FormField label="Company (brand)">
+              <select className="input" value={form.brand_id} onChange={(e) => setForm({ ...form, brand_id: e.target.value })}>
+                <option value="">—</option>
+                {brands?.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Supplier">
+              <select className="input" value={form.vendor_id} onChange={(e) => setForm({ ...form, vendor_id: e.target.value })}>
+                <option value="">—</option>
+                {vendors?.map((v: any) => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Category">
+              <select className="input" value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
+                <option value="">—</option>
+                {categories?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Unit"><input className="input" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} /></FormField>
+            <FormField label="Variant"><input className="input" value={form.variant} onChange={(e) => setForm({ ...form, variant: e.target.value })} /></FormField>
+            <FormField label="Offer"><input className="input" value={form.offer} onChange={(e) => setForm({ ...form, offer: e.target.value })} /></FormField>
+            <FormField label="Mfg date"><input className="input" type="date" value={form.mfd_date} onChange={(e) => setForm({ ...form, mfd_date: e.target.value })} /></FormField>
+            <FormField label="Expiry date"><input className="input" type="date" value={form.exp_date} onChange={(e) => setForm({ ...form, exp_date: e.target.value })} /></FormField>
+            <FormField label="Date received"><input className="input" type="date" value={form.received_date} onChange={(e) => setForm({ ...form, received_date: e.target.value })} /></FormField>
+            <FormField label="Stock qty"><input className="input" type="number" step="any" value={form.stock_qty} onChange={(e) => setForm({ ...form, stock_qty: e.target.value })} /></FormField>
+            <FormField label="Returning price"><input className="input" type="number" step="any" value={form.price_returning} onChange={(e) => setForm({ ...form, price_returning: e.target.value })} /></FormField>
+            <FormField label="Walk-in price"><input className="input" type="number" step="any" placeholder="blank = same as returning" value={form.price_walking} onChange={(e) => setForm({ ...form, price_walking: e.target.value })} /></FormField>
+            <FormField label="Wholesale price"><input className="input" type="number" step="any" value={form.price_wholesale} onChange={(e) => setForm({ ...form, price_wholesale: e.target.value })} /></FormField>
+            <FormField label="Wholesale min qty"><input className="input" type="number" step="any" value={form.wholesale_min_qty} onChange={(e) => setForm({ ...form, wholesale_min_qty: e.target.value })} /></FormField>
+            <FormField label="Low stock alert"><input className="input" type="number" step="any" value={form.low_stock_threshold} onChange={(e) => setForm({ ...form, low_stock_threshold: e.target.value })} /></FormField>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+            <button className="btn btn-primary" onClick={() => save.mutate()} disabled={!form.name.trim() || save.isPending}>
+              {save.isPending ? "Saving…" : editId ? "Save Changes" : "Add Product"}
+            </button>
+            <button className="btn btn-ghost" onClick={close}>Cancel</button>
+          </div>
+        </Modal>
+      )}
+    </Pane>
+  );
+}
