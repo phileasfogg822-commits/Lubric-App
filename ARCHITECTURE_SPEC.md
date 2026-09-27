@@ -111,10 +111,47 @@ New versioned routes under `/v1` (JWT or device-token auth):
 | 4 | Android APK (finances-only) | 5–8 days | ✅ Code done — `mobile/` (Capacitor + React, finances-only: collections, cash handovers, reservations; offline SQLite + outbox sync). APK is built by GitHub Actions (`.github/workflows/android.yml`) since the dev machine has no Android SDK. ⬜ User: push repo to GitHub → download APK artifact → pair. |
 | 5 | Hardening, conflict edge cases, signing, licensing | 3–5 days | ⬜ Pending |
 
-Deployment artefacts (Phase 3): `docker-compose.prod.yml`, `Caddyfile`,
-`DEPLOY.md`, `server/pair.js` — production topology is Caddy (auto-TLS) →
-api → postgres (internal), with nightly `pg_dump` backups (7-day rotation)
-and device pairing via `node pair.js` or `POST /api/v1/devices`.
+Deployment artefacts (Phase 3): the current production topology targets the shared
+VPS 72.61.115.120 — `docker-compose.vps.yml` (postgres internal only, API :9000,
+web :9001, nightly backups), `deploy/nginx-web.conf`, `DEPLOY.md`, `server/pair.js`.
+A single-host Caddy/TLS variant (`docker-compose.prod.yml` + `Caddyfile`) is kept for
+when a domain is available.
+
+## 10a. Android APK (Phase 4) — build & install
+
+The APK is built by GitHub Actions (`.github/workflows/android.yml`) because the dev
+machine has no Android SDK installed. No local SDK is required.
+
+```bash
+# 1. Create the GitHub repo (empty — no README), then from the project root:
+git remote add origin https://github.com/<you>/lubricapp.git
+git push -u origin master
+
+# 2. GitHub → Actions tab → "Android APK" → Run workflow
+# 3. When it turns green: Artifacts → lubric-field-apk → download the ZIP
+#    (contains app-debug.apk)
+
+# 4. Copy the .apk to the phone (USB / WhatsApp / Drive) and tap it.
+#    Allow "install from unknown sources" when Android asks.
+```
+
+Build locally instead (optional, needs Android Studio + JDK 17):
+
+```bash
+cd mobile
+npm install
+npm run build
+npx cap add android
+npx cap sync android
+cd android && gradlew assembleDebug
+# → mobile/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+First run on the phone: enter the server URL (`http://72.61.115.120:9000`), the pairing
+code from `node pair.js mobile "Field phone"`, and a device name. The debug APK is
+signed with the standard Android debug key — fine for sideloading, but for Play Store
+distribution a release keystore is required (Phase 5).
+
 
 ## 11. Risks
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-export default function Setup({ serverUrl, onDone }: { serverUrl: string; onDone: (url: string, code: string) => Promise<void> }) {
+export default function Setup({ serverUrl, onDone }: { serverUrl: string; onDone: (url: string, code: string, name: string) => Promise<void> }) {
   const [url, setUrl] = useState(serverUrl);
   const [code, setCode] = useState("");
   const [name, setName] = useState("Field phone");
@@ -9,7 +9,7 @@ export default function Setup({ serverUrl, onDone }: { serverUrl: string; onDone
 
   async function go() {
     setBusy(true); setErr("");
-    try { await onDone(url, code); }
+    try { await onDone(url, code, name); }
     catch (e: any) { setErr(e.message || "Pairing failed"); }
     setBusy(false);
   }

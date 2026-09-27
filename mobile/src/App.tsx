@@ -27,9 +27,9 @@ export default function App() {
     return (
       <Setup
         serverUrl={getServer()}
-        onDone={async (url: string, code: string) => {
+        onDone={async (url: string, code: string, name: string) => {
           setServer(url);
-          await pairDevice(code, "Field phone");
+          await pairDevice(code, name || "Field phone");
           setPaired(true);
         }}
       />
