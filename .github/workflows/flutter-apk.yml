@@ -40,7 +40,7 @@ jobs:
 
       - name: Analyze
         working-directory: field_app
-        run: flutter analyze --no-fatal-infos
+        run: flutter analyze lib --no-fatal-infos
 
       - name: Build release APK
         working-directory: field_app

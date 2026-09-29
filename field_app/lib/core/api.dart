@@ -48,7 +48,7 @@ class Api {
         throw ApiException('Server did not return a device token.');
       }
       await settings.setToken(token);
-    on DioException catch (e) {
+    } on DioException catch (e) {
       throw ApiException(_explain(e));
     }
   }

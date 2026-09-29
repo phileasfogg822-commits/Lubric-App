@@ -26,11 +26,10 @@ class Db {
   static Future<void> _createSchema(Database d) async {
     final b = d.batch();
 
-    // What the field user records.
     b.execute('''
       CREATE TABLE cash_movements (
         uuid          TEXT PRIMARY KEY,
-        kind          TEXT NOT NULL,      -- collection | handover | adjustment
+        kind          TEXT NOT NULL,
         amount        REAL NOT NULL DEFAULT 0,
         customer_uuid TEXT DEFAULT '',
         customer_name TEXT DEFAULT '',
@@ -42,7 +41,6 @@ class Db {
         'CREATE INDEX idx_mov_occurred ON cash_movements(occurred_at DESC)');
     b.execute('CREATE INDEX idx_mov_synced ON cash_movements(synced)');
 
-    // Goods booked for a customer.
     b.execute('''
       CREATE TABLE reservations (
         uuid          TEXT PRIMARY KEY,
@@ -56,7 +54,6 @@ class Db {
       )''');
     b.execute('CREATE INDEX idx_res_status ON reservations(status)');
 
-    // Reference data pulled from the shop system.
     b.execute('''
       CREATE TABLE customers (
         uuid           TEXT PRIMARY KEY,
@@ -76,7 +73,6 @@ class Db {
         synced_at TEXT
       )''');
 
-    // Outbox: rows waiting to be pushed to /api/v1/push.
     b.execute('''
       CREATE TABLE outbox (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,18 +88,17 @@ class Db {
 
     await b.commit(noResult: true);
   }
-
-  // ── cash movements ────────────────────────────────────────────────────────
+  // -- cash movements ------------------------------------------------------
 
   /// Save a movement and queue it for the server in one transaction, so a row
-  /// can never exist locally without being queued for upload.
+  /// can never exist locally without also being queued for upload.
   Future<void> saveMovement(CashMovement m) async {
     await _db.transaction((txn) async {
       await txn.insert(
         'cash_movements',
         {
           'uuid': m.uuid,
-          'kind': m.kind,
+          'kind': m.kind.name,
           'amount': m.amount,
           'customer_uuid': m.customerUuid,
           'customer_name': m.customerName,
@@ -115,7 +110,7 @@ class Db {
       );
       await _enqueue(txn, 'cash_movements', m.uuid, {
         'uuid': m.uuid,
-        'kind': m.kind,
+        'kind': m.kind.name,
         'amount': m.amount,
         'customer_name': m.customerName,
         'note': m.note,
@@ -134,8 +129,26 @@ class Db {
       limit: limit,
     );
     return rows.map(CashMovement.fromMap).toList();
+  }
 
-  // ── reservations ──────────────────────────────────────────────────────────
+  Future<CashMovementTotals> totalsFor(DateTime day) async {
+    final start = DateTime(day.year, day.month, day.day);
+    final end = start.add(const Duration(days: 1));
+    final rows = await _db.rawQuery(
+      'SELECT kind, COALESCE(SUM(amount),0) AS total FROM cash_movements '
+      'WHERE occurred_at >= ? AND occurred_at < ? GROUP BY kind',
+      [start.toUtc().toIso8601String(), end.toUtc().toIso8601String()],
+    );
+    final byKind = <String, double>{
+      for (final r in rows) r['kind'] as String: (r['total'] as num).toDouble(),
+    };
+    return CashMovementTotals(
+      collections: byKind['collection'] ?? 0,
+      handovers: byKind['handover'] ?? 0,
+      adjustments: byKind['adjustment'] ?? 0,
+    );
+  }
+  // -- reservations --------------------------------------------------------
 
   Future<void> saveReservation(Reservation r) async {
     await _db.transaction((txn) async {
@@ -146,7 +159,7 @@ class Db {
           'customer_name': r.customerName,
           'items_json': r.itemsJson,
           'amount': r.amount,
-          'status': r.status,
+          'status': r.status.name,
           'note': r.note,
           'created_at': r.createdAt.toIso8601String(),
           'synced': 0,
@@ -158,7 +171,7 @@ class Db {
         'customer_name': r.customerName,
         'items_json': r.itemsJson,
         'amount': r.amount,
-        'status': r.status,
+        'status': r.status.name,
         'note': r.note,
         'origin': 'mobile',
       });
@@ -170,8 +183,8 @@ class Db {
     return rows.map(Reservation.fromMap).toList();
   }
 
-  /// Server rows always win on conflict: the shop system is the source of truth
-  /// for reservation status (e.g. "fulfilled" when the sale is posted).
+  /// Server rows always win: the shop is the source of truth for status
+  /// (e.g. "fulfilled" once the sale is posted in the till).
   Future<void> applyRemoteReservation(Map<String, dynamic> row) async {
     final uuid = row['uuid'] as String?;
     if (uuid == null) return;
@@ -192,7 +205,7 @@ class Db {
     );
   }
 
-  // ── reference data from the shop ──────────────────────────────────────────
+  // -- reference data from the shop -----------------------------------------
 
   Future<void> applyRemoteCustomers(List<Map<String, dynamic>> rows) async {
     final now = DateTime.now().toIso8601String();
@@ -226,11 +239,10 @@ class Db {
     );
     return rows.map(Customer.fromMap).toList();
   }
+  // -- outbox / sync bookkeeping -------------------------------------------
 
-  // ── outbox / sync bookkeeping ─────────────────────────────────────────────
-
-  Future<void> _enqueue(
-      Transaction txn, String table, String uuid, Map<String, dynamic> payload) async {
+  Future<void> _enqueue(Transaction txn, String table, String uuid,
+      Map<String, dynamic> payload) async {
     await txn.insert('outbox', {
       'table_name': table,
       'row_uuid': uuid,
@@ -254,6 +266,13 @@ class Db {
     await _db.delete('outbox',
         where: 'table_name = ? AND row_uuid = ?', whereArgs: [table, uuid]);
     await _db.update(table, {'synced': 1}, where: 'uuid = ?', whereArgs: [uuid]);
+  }
+
+  /// Rows the server refused leave the retry queue so they cannot block the
+  /// rows behind them; the count is surfaced to the user instead.
+  Future<void> markRejected(String table, String uuid) async {
+    await _db.delete('outbox',
+        where: 'table_name = ? AND row_uuid = ?', whereArgs: [table, uuid]);
   }
 
   Future<int> pullCursor() async {
@@ -281,10 +300,10 @@ class Db {
   }
 
   static String _escape(String s) => s
-      .replaceAll('\\', '\\\\')
-      .replaceAll('"', '\\"')
-      .replaceAll('\n', '\\n')
-      .replaceAll('\r', '\\r');
+      .replaceAll(r'\', r'\\')
+      .replaceAll('"', r'\"')
+      .replaceAll('\n', r'\n')
+      .replaceAll('\r', r'\r');
 }
 
 class OutboxRow {
@@ -304,25 +323,3 @@ class OutboxRow {
         m['payload'] as String,
       );
 }
-
-  }
-
-  Future<CashMovementTotals> totalsFor(DateTime day) async {
-    final start = DateTime(day.year, day.month, day.day);
-    final end = start.add(const Duration(days: 1));
-    final rows = await _db.rawQuery(
-      '''SELECT kind, COALESCE(SUM(amount),0) AS total
-           FROM cash_movements
-          WHERE occurred_at >= ? AND occurred_at < ?
-          GROUP BY kind''',
-      [start.toUtc().toIso8601String(), end.toUtc().toIso8601String()],
-    );
-    final byKind = <String, double>{
-      for (final r in rows) r['kind'] as String: (r['total'] as num).toDouble(),
-    };
-    return CashMovementTotals(
-      collections: byKind['collection'] ?? 0,
-      handovers: byKind['handover'] ?? 0,
-      adjustments: byKind['adjustment'] ?? 0,
-    );
-  }

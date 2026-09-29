@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../core/db.dart';
 import '../core/theme.dart';
@@ -31,6 +30,19 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
       builder: (_) => const _ReservationForm(),
     );
     if (made == true) _reload();
+  }
+
+  Future<void> _setStatus(Reservation r, ReservationStatus s) async {
+    await Db.i.saveReservation(Reservation(
+      uuid: r.uuid,
+      customerName: r.customerName,
+      itemsJson: r.itemsJson,
+      amount: r.amount,
+      status: s,
+      note: r.note,
+      createdAt: r.createdAt,
+    ));
+    await _reload();
   }
 
   @override
@@ -70,7 +82,6 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
       ),
     );
   }
-
   Widget _tile(Reservation r) {
     final color = switch (r.status) {
       ReservationStatus.open => brandBlue,
@@ -106,7 +117,7 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
+                  color: color.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(r.status.label,
@@ -140,14 +151,7 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
       ),
     );
   }
-
-  Future<void> _setStatus(Reservation r, ReservationStatus s) async {
-    await Db.i.saveReservation(Reservation(
-      uuid: r.uuid,
-      customerName: r.customerName,
-      itemsJson: r.itemsJson,
-      amount: r.amount,
-
+}
 class _ReservationForm extends StatefulWidget {
   const _ReservationForm();
 
@@ -172,7 +176,7 @@ class _ReservationFormState extends State<_ReservationForm> {
 
   Future<void> _save() async {
     final amount = double.tryParse(_amount.text.trim()) ?? 0;
-    final desc = _items.text.trim().replaceAll('"', "'");
+    final desc = _items.text.trim().replaceAll(RegExp('["]'), "'");
     await Db.i.saveReservation(Reservation(
       uuid: newUuid(),
       customerName: _customer.text.trim(),
@@ -210,8 +214,7 @@ class _ReservationFormState extends State<_ReservationForm> {
             TextField(
               controller: _customer,
               textCapitalization: TextCapitalization.words,
-              decoration:
-                  const InputDecoration(hintText: 'Customer name'),
+              decoration: const InputDecoration(hintText: 'Customer name'),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -226,9 +229,6 @@ class _ReservationFormState extends State<_ReservationForm> {
               controller: _amount,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-              ],
               decoration:
                   const InputDecoration(hintText: 'Estimated value (PKR)'),
             ),
@@ -244,13 +244,5 @@ class _ReservationFormState extends State<_ReservationForm> {
         ),
       ),
     );
-  }
-}
-
-      status: s,
-      note: r.note,
-      createdAt: r.createdAt,
-    ));
-    await _reload();
   }
 }

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 
 import '../core/theme.dart';
 import '../core/update.dart';
@@ -17,7 +16,6 @@ class UpdatePrompt {
   /// surfaced because the app may be unusable on that old build.
   static Future<void> checkSilently(BuildContext context) async {
     try {
-      final info = await PackageInfo.fromPlatform();
       final check = await UpdateService.i.check();
       if (check == null || !check.isOutdated) return;
       if (!context.mounted) return;

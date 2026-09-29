@@ -62,6 +62,18 @@ class _RecordScreenState extends State<RecordScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
   }
 
+  Future<void> _pickDate() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _when,
+      firstDate: DateTime.now().subtract(const Duration(days: 90)),
+      lastDate: DateTime.now(),
+    );
+    if (date == null) return;
+    setState(() => _when = DateTime(
+        date.year, date.month, date.day, _when.hour, _when.minute));
+  }
+
   Widget _label(String t) => Padding(
         padding: const EdgeInsets.only(bottom: 6, left: 2),
         child: Text(t,
@@ -69,7 +81,7 @@ class _RecordScreenState extends State<RecordScreen> {
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
                 color: Color(0xFF444C57))),
-
+      );
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -144,20 +156,13 @@ class _RecordScreenState extends State<RecordScreen> {
           FilledButton(
             onPressed: _saving ? null : _save,
             child: Text(
-                _saving ? 'Saving…' : 'Save ${_kind.label.toLowerCase()}'),
+                _saving ? 'Saving...' : 'Save ${_kind.label.toLowerCase()}'),
           ),
         ],
       ),
     );
   }
-
-  Future<void> _pickDate() async {
-    final date = await showDatePicker(
-      context: context,
-      initialDate: _when,
-      firstDate: DateTime.now().subtract(const Duration(days: 90)),
-      lastDate: DateTime.now(),
-
+}
 /// Type-ahead over the customer list cached from the shop system. Works fully
 /// offline - the list is pulled during sync.
 class _CustomerPicker extends StatefulWidget {
@@ -245,12 +250,3 @@ class _CustomerPickerState extends State<_CustomerPicker> {
     );
   }
 }
-
-    );
-    if (date == null) return;
-    setState(() => _when = DateTime(
-        date.year, date.month, date.day, _when.hour, _when.minute));
-  }
-}
-
-      );
