@@ -1,8 +1,8 @@
 {
-  "versionCode": 3,
-  "versionName": "0.3.0",
-  "apk": "LubricField-0.3.0.apk",
-  "sha256": "5f175b06c69a6a6205306de2dc08a5d29f459ad8adedb575eddaa25d74718f29",
+  "versionCode": 4,
+  "versionName": "0.4.0",
+  "apk": "LubricField-0.4.0.apk",
+  "sha256": "df3d346b7bfd8f09253f0c7c7117c556c3875f8e536a6aac5e899d049f49b0a7",
   "mandatory": true,
-  "notes": "IMPORTANT FIX - the app could not reach the server at all. Android blocks plain HTTP by default, so every sync and pairing request was failing with 'cannot reach the server'. This build adds the network security config that permits it. Version 0.1.0 and 0.2.0 cannot talk to the server; you must install this one."
+  "notes": "THE FIX. Flutter only puts the INTERNET permission in debug/profile builds, so every release APK so far shipped with no network permission at all - the app could not make a single request, which is why it always said 'cannot reach the server' even though a browser on the same phone loaded it fine. This build adds that permission plus the cleartext-HTTP config. Install this one."
 }
