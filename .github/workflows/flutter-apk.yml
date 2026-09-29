@@ -32,6 +32,10 @@ jobs:
           if [ ! -d android ]; then
             flutter create . --platforms=android --org app.lubric \
               --project-name lubric_field
+            # `flutter create` also drops a placeholder test/widget_test.dart
+            # that references a MyApp class this project does not have. Our own
+            # tests live in test/ instead.
+            rm -f test/widget_test.dart
           fi
 
       - name: Resolve packages
