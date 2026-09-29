@@ -15,3 +15,13 @@ _tsc*.txt
 *.zip
 apk-output/
 *.apk
+
+# Flutter (field_app)
+field_app/.dart_tool/
+field_app/build/
+field_app/.flutter-plugins
+field_app/.flutter-plugins-dependencies
+field_app/.packages
+field_app/android/
+field_app/ios/
+field_app/apk-sha256.txt

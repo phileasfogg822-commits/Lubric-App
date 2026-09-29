@@ -41,6 +41,10 @@ services:
       DB_USER: ${DB_USER:-lubric}
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+    volumes:
+      # Published APK builds + android.json. To ship a new app version you
+      # drop the APK in here and bump android.json - no rebuild, no restart.
+      - ./updates:/app/updates:ro
     ports:
       - "9000:3001"
     depends_on:

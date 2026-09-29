@@ -1,0 +1,8 @@
+{
+  "versionCode": 1,
+  "versionName": "0.1.0-initial",
+  "apk": "LubricField-0.1.0.apk",
+  "sha256": "",
+  "mandatory": false,
+  "notes": "First native build of Lubric Field. Record collections, cash handovers and reservations offline, and sync them to the shop system."
+}

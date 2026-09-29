@@ -2,8 +2,14 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { query } from './db.js';
 import pool from './db.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const UPDATES_DIR = process.env.UPDATES_DIR || path.join(__dirname, 'updates');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -539,7 +545,70 @@ app.post('/api/v1/push', async (req, res) => {
   res.json({ applied, rejected });
 });
 
+// ─── App update distribution ────────────────────────────────────────────────
+// Mirrors the Mirror Twins pattern so publishing a new build is a familiar
+// two-step job on the VPS:
+//
+//   1. copy the new APK into  updates/android/
+//   2. edit  updates/android.json  (versionCode, versionName, apk, sha256)
+//
+// Phones poll /api/v1/app/version on launch and, if versionCode is newer than
+// the installed build, download the APK from /api/v1/app/download, verify its
+// SHA-256 and hand it to Android's installer.
+function readManifest() {
+  return new Promise((resolve, reject) => {
+    fs.readFile(path.join(UPDATES_DIR, 'android.json'), 'utf8', (err, data) => {
+      if (err) return reject(err);
+      try {
+        resolve(JSON.parse(data));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
+
+app.get('/api/v1/app/version', async (req, res) => {
+  try {
+    const manifest = await readManifest();
+    // Rewrite the manifest's URL to point at this server, so the same file
+    // works whether the phone reached us by IP or, later, by domain.
+    res.json({
+      versionCode: manifest.versionCode,
+      versionName: manifest.versionName,
+      sha256: manifest.sha256,
+      mandatory: manifest.mandatory === true,
+      notes: manifest.notes || '',
+      apk: `${req.protocol}://${req.get('host')}/api/v1/app/download`,
+    });
+  } catch (e) {
+    res.status(404).json({ error: 'No app update has been published yet.' });
+  }
+});
+
+app.get('/api/v1/app/download', async (req, res) => {
+  let manifest;
+  try {
+    manifest = await readManifest();
+  } catch (e) {
+    return res.status(404).json({ error: 'No app update has been published yet.' });
+  }
+  // Only ever serve a plain file name that already exists under the updates
+  // directory - never a caller-supplied path.
+  const name = path.basename(String(manifest.apk || ''));
+  const file = path.join(UPDATES_DIR, 'android', name);
+  if (!name || !fs.existsSync(file)) {
+    return res.status(404).json({ error: 'The published APK is missing on the server.' });
+  }
+  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="${name}"`);
+  fs.createReadStream(file).pipe(res);
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Lubric App API server running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/api/health`);
+  console.log(`Updates dir:  ${UPDATES_DIR}`);
 });

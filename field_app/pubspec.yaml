@@ -1,0 +1,41 @@
+name: lubric_field
+description: "Lubric Field - finance companion for field staff (collections, handovers, reports)."
+publish_to: "none"
+
+# versionName is what users see; the integer after + is versionCode.
+# Bump BOTH when publishing an update - the app compares versionCode against
+# /updates/android.json on the server to decide whether an update exists.
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- storage ---
+  sqflite: ^2.3.3          # offline-first SQLite
+  path: ^1.9.0
+  path_provider: ^2.1.4
+  shared_preferences: ^2.3.3
+
+  # --- networking ---
+  dio: ^5.7.0              # download with progress for the APK updater
+
+  # --- native integration ---
+  share_plus: ^10.1.2      # native share sheet -> WhatsApp / Gmail / Drive
+  open_filex: ^4.5.0       # opens PDFs and launches the APK installer
+  package_info_plus: ^8.1.1  # reads the installed versionCode
+
+  # --- formatting / hashing ---
+  intl: ^0.19.0            # currency + dates (PKR)
+  crypto: ^3.0.5           # sha256 verification of downloaded APKs
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
