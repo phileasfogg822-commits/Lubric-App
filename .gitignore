@@ -12,3 +12,4 @@ backups/
 _tsc*.txt
 .diag*
 
+*.zip
