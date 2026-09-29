@@ -1,8 +1,8 @@
 {
-  "versionCode": 1,
-  "versionName": "0.1.0",
-  "apk": "LubricField-0.1.0.apk",
-  "sha256": "c1101a3573092578e677de989dbb155f9049b0c56e95c89b4012215a4d5186ea",
+  "versionCode": 2,
+  "versionName": "0.2.0",
+  "apk": "LubricField-0.2.0.apk",
+  "sha256": "a8005eb2d6fe976d462c0f463a7e2bde4c11063252c1b34eea0c9139b26c6b51",
   "mandatory": false,
-  "notes": "First native Flutter build. Record collections, cash handovers and reservations offline, then sync to the shop system. Tap More > Check for updates to pull future builds from the server."
+  "notes": "Fixes the greyed-out Pair button: the button now enables as soon as a server URL and pairing code are entered. Also stops the app crashing if settings are read before initialisation. Adds a regression test so this cannot come back."
 }
