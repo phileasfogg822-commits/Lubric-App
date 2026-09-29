@@ -33,6 +33,20 @@ jobs:
           npx cap add android
           npx cap sync android
 
+      # @capacitor-community/sqlite requires minSdk 23; Capacitor defaults to 22,
+      # which fails the build with "uses-sdk:minSdkVersion 22 cannot be smaller than 23".
+      - name: Bump minSdkVersion to 23
+        working-directory: mobile
+        run: |
+          sed -i 's/minSdkVersion = 22/minSdkVersion = 23/' android/variables.gradle
+          grep -n "minSdkVersion" android/variables.gradle
+
+      - name: Enable cleartext HTTP for the server IP
+        working-directory: mobile
+        run: |
+          sed -i 's#android:usesCleartextTraffic="false"#android:usesCleartextTraffic="true"#' android/app/src/main/AndroidManifest.xml || true
+          grep -c "usesCleartextTraffic" android/app/src/main/AndroidManifest.xml || true
+
       - name: Build debug APK
         working-directory: mobile/android
         run: |
