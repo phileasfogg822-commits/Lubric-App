@@ -78,7 +78,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_inspections_uuid ON inspections(uuid);
 
 -- ── Devices (paired desktop / mobile clients) ────────────────────────────────
 CREATE TABLE IF NOT EXISTS devices (
-  id            INTEGER PRIMARY KEY,
+  id            SERIAL PRIMARY KEY,
   shop_id       INTEGER NOT NULL REFERENCES shops(id),
   kind          TEXT NOT NULL DEFAULT 'desktop' CHECK (kind IN ('desktop','mobile')),
   name          TEXT DEFAULT '',
@@ -94,7 +94,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_uuid ON devices(uuid);
 
 -- ── Cash movements (the APK's core table: collections, handovers) ───────────
 CREATE TABLE IF NOT EXISTS cash_movements (
-  id            INTEGER PRIMARY KEY,
+  id            SERIAL PRIMARY KEY,
   uuid          TEXT UNIQUE NOT NULL,
   shop_id       INTEGER NOT NULL REFERENCES shops(id),
   kind          TEXT NOT NULL CHECK (kind IN ('collection','handover','expense','adjustment')),
@@ -115,7 +115,7 @@ CREATE INDEX IF NOT EXISTS idx_cash_movements_shop ON cash_movements(shop_id, oc
 
 -- ── Reservations (goods set aside / booked for a customer) ───────────────────
 CREATE TABLE IF NOT EXISTS reservations (
-  id            INTEGER PRIMARY KEY,
+  id            SERIAL PRIMARY KEY,
   uuid          TEXT UNIQUE NOT NULL,
   shop_id       INTEGER NOT NULL REFERENCES shops(id),
   customer_id   INTEGER REFERENCES customers(id),
@@ -130,3 +130,25 @@ CREATE TABLE IF NOT EXISTS reservations (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_reservations_updated ON reservations(updated_at);
+
+-- ── Auto-increment repair (idempotent) ───────────────────────────────────────
+-- Databases created BEFORE the SERIAL fix have devices / cash_movements /
+-- reservations with a plain INTEGER PRIMARY KEY and no sequence attached, so any
+-- INSERT that omits `id` dies with:
+--     null value in column "id" of relation "devices" violates not-null constraint
+-- Attach a sequence to each of them. Safe to re-run.
+DO $fix$
+DECLARE
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['devices','cash_movements','reservations'] LOOP
+    EXECUTE format('CREATE SEQUENCE IF NOT EXISTS %I_id_seq', t);
+    EXECUTE format('ALTER TABLE %I ALTER COLUMN id SET DEFAULT nextval(%L)', t, t || '_id_seq');
+    -- point the sequence just past the highest existing id (nextval then returns max+1)
+    EXECUTE format(
+      'SELECT setval(%L, GREATEST(COALESCE((SELECT MAX(id) FROM %I), 0) + 1, 1), false)',
+      t || '_id_seq', t
+    );
+  END LOOP;
+END
+$fix$;
