@@ -1,8 +1,8 @@
 {
-  "versionCode": 2,
-  "versionName": "0.2.0",
-  "apk": "LubricField-0.2.0.apk",
-  "sha256": "a8005eb2d6fe976d462c0f463a7e2bde4c11063252c1b34eea0c9139b26c6b51",
-  "mandatory": false,
-  "notes": "Fixes the greyed-out Pair button: the button now enables as soon as a server URL and pairing code are entered. Also stops the app crashing if settings are read before initialisation. Adds a regression test so this cannot come back."
+  "versionCode": 3,
+  "versionName": "0.3.0",
+  "apk": "LubricField-0.3.0.apk",
+  "sha256": "5f175b06c69a6a6205306de2dc08a5d29f459ad8adedb575eddaa25d74718f29",
+  "mandatory": true,
+  "notes": "IMPORTANT FIX - the app could not reach the server at all. Android blocks plain HTTP by default, so every sync and pairing request was failing with 'cannot reach the server'. This build adds the network security config that permits it. Version 0.1.0 and 0.2.0 cannot talk to the server; you must install this one."
 }
