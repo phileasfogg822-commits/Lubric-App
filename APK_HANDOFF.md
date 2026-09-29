@@ -8,6 +8,13 @@ another AI/tool (e.g. Astra) that has GitHub access, and it should be able to pr
 
 ## 0. TL;DR — the task
 
+| | |
+|---|---|
+| **Repository** | **https://github.com/hrperalglobalcity-spec/lubric-field** (private, branch `master`) |
+| **Actions page** | https://github.com/hrperalglobalcity-spec/lubric-field/actions/workflows/android.yml |
+| **Build command** | GitHub Actions -> "Android APK" -> **Run workflow** |
+| **Deliverable** | `app-debug.apk` from the `lubric-field-apk` artifact |
+
 > Build the Android APK for the app in the `mobile/` folder of this repository and give
 > back a downloadable `.apk` file. Use GitHub Actions to do the build. Do not modify
 > application logic unless the build fails.
@@ -92,15 +99,27 @@ on manual dispatch. It performs:
 
 ## 5. Step-by-step instructions
 
-### Step A — push the code
+### Step A — the code is already on GitHub
+
+Repository (private, owned by `hrperalglobalcity-spec`):
+
+**https://github.com/hrperalglobalcity-spec/lubric-field**
+
+The default branch is `master` and it already contains the full source, including
+`mobile/` and the CI workflow. Nothing to push — go straight to Step B.
+
 ```bash
-# from the repository root
-git remote add origin https://github.com/<OWNER>/<REPO>.git   # skip if 'origin' exists
-git push -u origin master
+# only if you need a fresh clone
+git clone https://github.com/hrperalglobalcity-spec/lubric-field.git
+cd lubric-field
 ```
 
 ### Step B — trigger the build
 GitHub -> **Actions** tab -> **Android APK** -> **Run workflow** -> wait ~5-10 min.
+
+Direct link: **https://github.com/hrperalglobalcity-spec/lubric-field/actions/workflows/android.yml**
+
+Click **Run workflow** (right side, "Run workflow" dropdown) -> branch `master` -> green button.
 
 ### Step C — download the artifact
 GitHub -> Actions -> the run -> bottom **Artifacts** -> download `lubric-field-apk` (a ZIP).
