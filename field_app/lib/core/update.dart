@@ -45,7 +45,6 @@ class UpdateCheck {
     required this.currentCode,
     required this.currentName,
     required this.available,
-    this.release,
   });
 
   final int currentCode;

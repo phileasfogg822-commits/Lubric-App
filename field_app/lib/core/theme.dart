@@ -48,7 +48,7 @@ ThemeData buildTheme() {
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
       ),
     ),
-    cardTheme: CardThemeData(
+    cardTheme: CardTheme(
       elevation: 0,
       color: Colors.white,
       shape: RoundedRectangleBorder(
