@@ -56,11 +56,13 @@ jobs:
       - name: Build release APK
         working-directory: field_app
         run: |
-          # These two settings are required on Android for the in-app updater:
-          # the app downloads an APK over plain HTTP from the shop server, and
-          # hands it to the system installer via a FileProvider content:// URI.
-          sed -i 's/android:usesCleartextTraffic="false"/android:usesCleartextTraffic="true"/' \
-            android/app/src/main/AndroidManifest.xml || true
+          # REQUIRED: Android 9+ blocks plain HTTP by default and Flutter's
+          # generated manifest never opts in, so the app cannot reach an
+          # http:// server at all. This writes a network security config and
+          # points the manifest at it. A previous sed for
+          # usesCleartextTraffic="false" silently did nothing, because that
+          # string does not exist in Flutter's template.
+          python3 tool/patch_android.py
           flutter build apk --release
 
       - name: Checksum
