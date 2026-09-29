@@ -108,7 +108,7 @@ New versioned routes under `/v1` (JWT or device-token auth):
 | 1 | Tauri installer + dual-mode DB driver | 2–3 days | ✅ Done |
 | 2 | Local SQLite schema + sync agent + `/v1` sync endpoints | 5–8 days | ✅ Done |
 | 3 | VPS deploy (compose, TLS, backups, pairing) | 1–2 days | ✅ Done — adapted: shared VPS 72.61.115.120, `/opt/apps/app9`, API on **:9000**, web dashboard on **:9001**, no domain/TLS yet (Caddy skipped; HTTP upgrade path documented) |
-| 4 | Android APK (finances-only) | 5–8 days | ✅ Code done — `mobile/` (Capacitor + React, finances-only: collections, cash handovers, reservations; offline SQLite + outbox sync). APK is built by GitHub Actions (`.github/workflows/android.yml`) since the dev machine has no Android SDK. ⬜ User: push repo to GitHub → download APK artifact → pair. |
+| 4 | Android APK (finances-only) | 5–8 days | ✅ **DONE — APK BUILT & VERIFIED.** `mobile/` Capacitor + React app; GitHub Actions build #36576035654 green in 4m56s; artifact `lubric-field-apk` (19.6 MB) → `app-debug.apk` (17.58 MB, valid, signed with the Android debug key). Local copy: `LubricField-v0.1.0-debug.apk` in the project root. Repo: https://github.com/hrperalglobalcity-spec/lubric-field |
 | 5 | Hardening, conflict edge cases, signing, licensing | 3–5 days | ⬜ Pending |
 
 Deployment artefacts (Phase 3): the current production topology targets the shared

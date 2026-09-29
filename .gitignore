@@ -13,3 +13,5 @@ _tsc*.txt
 .diag*
 
 *.zip
+apk-output/
+*.apk

@@ -122,8 +122,28 @@ Direct link: **https://github.com/hrperalglobalcity-spec/lubric-field/actions/wo
 Click **Run workflow** (right side, "Run workflow" dropdown) -> branch `master` -> green button.
 
 ### Step C — download the artifact
-GitHub -> Actions -> the run -> bottom **Artifacts** -> download `lubric-field-apk` (a ZIP).
-Inside: `mobile/android/app/build/outputs/apk/debug/app-debug.apk`.
+
+**Status: already done — the APK has been built and verified.**
+
+| | |
+|---|---|
+| Workflow run | https://github.com/hrperalglobalcity-spec/lubric-field/actions/runs/36576035654 |
+| Result | ✅ success (4m56s) |
+| Artifact | `lubric-field-apk` (19.6 MB) |
+| Debug APK | `app-debug.apk` — **17.58 MB, valid, debug-signed, ready to install** |
+| Local copy | `LubricField-v0.1.0-debug.apk` in the project root |
+
+To fetch it again later: GitHub -> Actions -> the run -> bottom **Artifacts** ->
+download `lubric-field-apk` (a ZIP) -> unzip ->
+`lubric-field-apk/debug/app-debug.apk`.
+
+Or from a terminal with `gh`:
+```bash
+gh run download 36576035654 --repo hrperalglobalcity-spec/lubric-field --dir apk-output
+```
+
+Both APKs are produced: `debug/app-debug.apk` (installable) and
+`release/app-release-unsigned.apk` (16.58 MB — **not** installable; it has no signature).
 
 ### Step D — install on a phone
 Copy the `.apk` to the phone (USB / Drive / WhatsApp) and tap it.
