@@ -1,8 +1,8 @@
 {
   "versionCode": 1,
-  "versionName": "0.1.0-initial",
+  "versionName": "0.1.0",
   "apk": "LubricField-0.1.0.apk",
-  "sha256": "",
+  "sha256": "c1101a3573092578e677de989dbb155f9049b0c56e95c89b4012215a4d5186ea",
   "mandatory": false,
-  "notes": "First native build of Lubric Field. Record collections, cash handovers and reservations offline, and sync them to the shop system."
+  "notes": "First native Flutter build. Record collections, cash handovers and reservations offline, then sync to the shop system. Tap More > Check for updates to pull future builds from the server."
 }
