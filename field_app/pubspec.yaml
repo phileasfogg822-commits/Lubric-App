@@ -5,7 +5,9 @@ publish_to: "none"
 # versionName is what users see; the integer after + is versionCode.
 # Bump BOTH when publishing an update - the app compares versionCode against
 # /updates/android.json on the server to decide whether an update exists.
-version: 0.1.0+1
+#   0.1.0+1  first native build
+#   0.2.0+2  fix: Pair button was permanently disabled
+version: 0.2.0+2
 
 environment:
   sdk: ">=3.3.0 <4.0.0"

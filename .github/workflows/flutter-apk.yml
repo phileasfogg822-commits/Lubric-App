@@ -40,7 +40,14 @@ jobs:
 
       - name: Analyze
         working-directory: field_app
-        run: flutter analyze lib --no-fatal-infos
+        run: flutter analyze lib test --no-fatal-infos
+
+      # Runs the widget tests before an APK is ever produced. The setup-screen
+      # regression test lives here: it caught a permanently-disabled Pair
+      # button that unit review had missed.
+      - name: Test
+        working-directory: field_app
+        run: flutter test --reporter expanded
 
       - name: Build release APK
         working-directory: field_app

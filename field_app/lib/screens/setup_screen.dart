@@ -62,10 +62,6 @@ class _SetupScreenState extends State<SetupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canSubmit = !_busy &&
-        _url.text.trim().isNotEmpty &&
-        _code.text.trim().isNotEmpty;
-
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
@@ -137,10 +133,7 @@ class _SetupScreenState extends State<SetupScreen> {
                 _errorBox(_error!),
               ],
               const SizedBox(height: 22),
-              FilledButton(
-                onPressed: canSubmit ? _pair : null,
-                child: Text(_busy ? 'Pairing…' : 'Pair this device'),
-              ),
+              _pairButton(),
               const SizedBox(height: 16),
               Text(
                 'Get the code from the shop: on the server run\n'
@@ -152,6 +145,32 @@ class _SetupScreenState extends State<SetupScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// The submit button's enabled state is driven directly by the two text
+  /// controllers.
+  ///
+  /// A `TextEditingController` changes do NOT rebuild the widget that reads
+  /// `controller.text` inside `build()` - so computing `canSubmit` in `build()`
+  /// leaves the button permanently disabled after the first frame. Listeners
+  /// on the controllers rebuild exactly this subtree on every keystroke, which
+  /// is both correct and cheaper than calling setState for each character.
+  Widget _pairButton() {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: _code,
+      builder: (context, _, __) => ValueListenableBuilder<TextEditingValue>(
+        valueListenable: _url,
+        builder: (context, _, __) {
+          final canSubmit = !_busy &&
+              _url.text.trim().isNotEmpty &&
+              _code.text.trim().isNotEmpty;
+          return FilledButton(
+            onPressed: canSubmit ? _pair : null,
+            child: Text(_busy ? 'Pairing…' : 'Pair this device'),
+          );
+        },
       ),
     );
   }
