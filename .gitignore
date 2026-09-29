@@ -28,3 +28,4 @@ field_app/apk-sha256.txt
 
 flutter-apk/
 *.apk.sha256
+field_app/manifest.txt
