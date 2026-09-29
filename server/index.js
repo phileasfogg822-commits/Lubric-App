@@ -458,15 +458,40 @@ app.get('/api/v1/pull', async (req, res) => {
   const serverNow = new Date();
   const changes = {};
   for (const [table, meta] of Object.entries(SYNC_TABLES)) {
-    let sqlText = `SELECT * FROM ${table} WHERE shop_id = $1 AND updated_at > $2`;
-    const params = [shopId, since.toISOString()];
-    if (meta.softDelete) sqlText += ` AND (deleted_at IS NULL OR deleted_at > $2)`;
-    sqlText += ` ORDER BY updated_at LIMIT 500`;
-    const r = await query(sqlText, params);
-    if (r.rows.length) changes[table] = r.rows;
+    // Each table is fetched independently. A failure here used to reject an
+    // unhandled promise, which kills Node 20 outright, takes the API down for
+    // every user, and shows the phone a dropped connection it reports as
+    // "cannot reach the server". One bad table must never do that again.
+    try {
+      let sqlText = `SELECT * FROM ${table} WHERE shop_id = $1 AND updated_at > $2`;
+      const params = [shopId, since.toISOString()];
+      if (meta.softDelete) sqlText += ` AND (deleted_at IS NULL OR deleted_at > $2)`;
+      sqlText += ` ORDER BY updated_at LIMIT 500`;
+      const r = await query(sqlText, params);
+      if (r.rows.length) changes[table] = r.rows;
+    } catch (e) {
+      console.error(`[sync] pull failed for "${table}":`, e.message);
+    }
   }
-  await query('UPDATE devices SET last_sync_at = NOW() WHERE id = $1', [req.device.id]);
+
+  try {
+    await query('UPDATE devices SET last_sync_at = NOW() WHERE id = $1', [req.device.id]);
+  } catch (e) {
+    console.error('[sync] could not stamp last_sync_at:', e.message);
+  }
   res.json({ cursor: serverNow.getTime(), server_time: serverNow.toISOString(), changes });
+});
+
+// ─── Last-resort safety nets ────────────────────────────────────────────────
+// Without these, one rejected promise anywhere in an async route handler
+// terminates the Node process (the default since Node 15). Docker then
+// restarts the API and every connected client sees its request die with no
+// usable error. Log loudly instead of dying, and answer the client properly.
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[fatal] uncaught exception:', err);
 });
 
 /**
@@ -605,6 +630,14 @@ app.get('/api/v1/app/download', async (req, res) => {
     'Content-Disposition',
     `attachment; filename="${name}"`);
   fs.createReadStream(file).pipe(res);
+});
+
+// Express error-handling middleware MUST be registered last, after every route,
+// otherwise it is never reached and errors fall through to a dropped connection.
+app.use((err, req, res, _next) => {
+  console.error('[http] ' + req.method + ' ' + req.originalUrl + ' -> ' + err.message);
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'Server error: ' + err.message });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
