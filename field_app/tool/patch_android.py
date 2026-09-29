@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""Let the Android release build reach the shop server over plain HTTP.
+"""Make the Android RELEASE build able to reach the shop server at all.
 
-Android 9 (API 28) blocks cleartext HTTP by default and Flutter's generated
-AndroidManifest.xml does not opt in, so an http:// server is unreachable and
-every request fails with a connection error - the app looks like the server is
-down when it is perfectly reachable from a browser.
+Two separate, well-known Flutter traps, both of which produce the same
+symptom - the app says it cannot reach a server that a browser on the very same
+phone loads perfectly:
 
-This writes a network security config and points the manifest at it.
-Idempotent: safe to run on every build.
+1. Flutter puts the INTERNET permission in the *debug* and *profile* manifests
+   only. A release APK therefore ships with NO android.permission.INTERNET and
+   every request fails immediately with a connection error.
+
+2. Android 9 (API 28) blocks cleartext HTTP by default and Flutter's main
+   manifest never opts in, so an http:// URL is unreachable even with the
+   permission present.
+
+This script fixes both, and is idempotent: safe to run on every build.
 
 TODO(owner): once a domain with a Let's Encrypt certificate is in place, set
 cleartextTrafficPermitted="false" in NETWORK_CONFIG below and rebuild. Nothing
-else in the app needs to change.
+else in the app needs to change - the INTERNET permission always stays.
 """
 
 import os
@@ -38,6 +44,7 @@ NETWORK_CONFIG = """<?xml version="1.0" encoding="utf-8"?>
 </network-security-config>
 """
 
+PERMISSION = '<uses-permission android:name="android.permission.INTERNET" />'
 ATTRIBUTE = 'android:networkSecurityConfig="@xml/network_security_config"'
 
 
@@ -53,13 +60,16 @@ def main() -> int:
 
     with open(MANIFEST, encoding="utf-8") as fh:
         source = fh.read()
+    original = source
 
-    if ATTRIBUTE in source:
-        print("manifest already references the network security config")
+    # --- 1. INTERNET permission ------------------------------------------
+    # Without this a release APK cannot make ANY network request.
+    if "android.permission.INTERNET" in source:
+        print("manifest already declares the INTERNET permission")
     else:
         patched, count = re.subn(
-            r"<application\b",
-            '<application\n        ' + ATTRIBUTE,
+            r"[ \t]*<application\b",
+            "    " + PERMISSION + "\n    <application",
             source,
             count=1,
         )
@@ -67,15 +77,36 @@ def main() -> int:
             print("ERROR: no <application> tag found in the manifest",
                   file=sys.stderr)
             return 1
+        source = patched
+        print("ADDED android.permission.INTERNET to the release manifest")
+
+    # --- 2. cleartext HTTP ----------------------------------------------
+    if ATTRIBUTE in source:
+        print("manifest already references the network security config")
+    else:
+        patched, count = re.subn(
+            r"[ \t]*<application\b",
+            "    <application\n        " + ATTRIBUTE,
+            source,
+            count=1,
+        )
+        if count == 0:
+            print("ERROR: no <application> tag found in the manifest",
+                  file=sys.stderr)
+            return 1
+        source = patched
+        print("ADDED android:networkSecurityConfig to the manifest")
+
+    if source != original:
         with open(MANIFEST, "w", encoding="utf-8") as fh:
-            fh.write(patched)
-        print("patched manifest to reference the network security config")
+            fh.write(source)
 
     # Echo the result so the CI log proves it actually took effect - a silent
     # no-op here is exactly the bug this script exists to prevent.
-    with open(MANIFEST, encoding="utf-8") as fh:
-        tag = re.search(r"<application.*?>", fh.read(), re.S)
+    print("--- INTERNET permission present? ---")
+    print("android.permission.INTERNET" in source)
     print("--- manifest <application> tag ---")
+    tag = re.search(r"<application.*?>", source, re.S)
     print(tag.group(0) if tag else "(not found)")
     return 0
 

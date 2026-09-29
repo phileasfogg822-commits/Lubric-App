@@ -7,8 +7,9 @@ publish_to: "none"
 # /updates/android.json on the server to decide whether an update exists.
 #   0.1.0+1  first native build
 #   0.2.0+2  fix: Pair button was permanently disabled
-#   0.3.0+3  fix: allow plain HTTP so the app can reach the server at all
-version: 0.3.0+3
+#   0.3.0+3  cleartext HTTP allowed - still no network: no INTERNET permission
+#   0.4.0+4  add the INTERNET permission Flutter omits from release builds
+version: 0.4.0+4
 
 environment:
   sdk: ">=3.3.0 <4.0.0"

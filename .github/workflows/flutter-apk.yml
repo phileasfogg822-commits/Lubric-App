@@ -56,20 +56,24 @@ jobs:
       - name: Build release APK
         working-directory: field_app
         run: |
-          # REQUIRED: Android 9+ blocks plain HTTP by default and Flutter's
-          # generated manifest never opts in, so the app cannot reach an
-          # http:// server at all. This writes a network security config and
-          # points the manifest at it. A previous sed for
-          # usesCleartextTraffic="false" silently did nothing, because that
-          # string does not exist in Flutter's template.
+          # REQUIRED: fixes two Flutter release-build traps that each make the
+          # app unable to reach the server at all:
+          #   * android.permission.INTERNET lives only in the debug/profile
+          #     manifests, so a release APK cannot make any request;
+          #   * cleartext HTTP is blocked by default from Android 9 onwards.
           python3 tool/patch_android.py
           flutter build apk --release
 
-      # Read the manifest back OUT of the signed APK and assert the attribute
-      # really made it into the compiled binary. A silently-ignored patch step
-      # is exactly what shipped a broken build once, so the build now fails
-      # loudly instead of shipping an app that cannot reach the server.
-      - name: Verify the APK can make plain-HTTP requests
+      # Read the manifest back OUT of the signed APK and assert that everything
+      # the app needs to make a network request is really in the compiled
+      # binary. A silently-ignored patch step is exactly what shipped two
+      # broken builds in a row, so the build now fails loudly instead of
+      # shipping an app that cannot reach the server.
+      #
+      #   1. android.permission.INTERNET  - Flutter omits it from release
+      #      manifests, so without it no request can be made at all.
+      #   2. android:networkSecurityConfig - required for a plain http:// URL.
+      - name: Verify the APK can actually make network requests
         working-directory: field_app
         run: |
           set -euo pipefail
@@ -80,14 +84,28 @@ jobs:
             exit 1
           fi
           "$AAPT2" dump xmltree --file AndroidManifest.xml "$APK" > manifest.txt
-          echo "--- networkSecurityConfig in the compiled manifest ---"
-          grep -i "networkSecurityConfig" manifest.txt || true
+          "$AAPT2" dump permissions "$APK" > permissions.txt
+
+          echo "--- permissions in the shipped APK ---"
+          cat permissions.txt
+
+          fail=0
+          if ! grep -q "android.permission.INTERNET" permissions.txt; then
+            echo "::error::APK has no android.permission.INTERNET - the app"
+            echo "::error::cannot make a single network request"
+            fail=1
+          fi
           if ! grep -qi "networkSecurityConfig" manifest.txt; then
             echo "::error::APK is missing android:networkSecurityConfig -"
             echo "::error::the app will be unable to reach an http:// server"
+            fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo "--- manifest dump ---"
+            cat manifest.txt
             exit 1
           fi
-          echo "OK: the shipped APK permits cleartext HTTP"
+          echo "OK: INTERNET permission present and cleartext HTTP permitted"
 
       - name: Checksum
         working-directory: field_app
