@@ -10,6 +10,7 @@ class Settings {
   static const _kToken = 'lf_token';
   static const _kDeviceName = 'lf_device_name';
   static const _kLastSync = 'lf_last_sync';
+  static const _kLastError = 'lf_last_error';
 
   SharedPreferences? _p;
 
@@ -47,6 +48,27 @@ class Settings {
 
   Future<void> setLastSync(DateTime when) async =>
       _p?.setString(_kLastSync, when.toIso8601String());
+
+  /// The last thing that went wrong, kept across restarts.
+  ///
+  /// A SnackBar is gone the moment the screen closes, so a field user
+  /// reporting "it does not sync" had nothing to read back. This is what the
+  /// diagnostics screen shows.
+  String get lastError => _p?.getString(_kLastError) ?? '';
+
+  Future<void> setLastError(String message) async {
+    if (message.isEmpty) {
+      await _p?.remove(_kLastError);
+    } else {
+      await _p?.setString(_kLastError, message);
+    }
+  }
+
+  /// Just the tail of the token, enough to tell two devices apart.
+  String get tokenHint => token.isEmpty
+      ? 'none'
+      : '${token.substring(0, token.length > 8 ? 6 : token.length)}…'
+          ' (${token.length} chars)';
 
   /// Un-pair this device: the server keeps the row (so the shop can see the
   /// device in its list and revoke it), we just forget the token locally.

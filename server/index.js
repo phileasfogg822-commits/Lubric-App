@@ -484,6 +484,41 @@ app.post('/api/v1/devices/pair', async (req, res) => {
   res.json({ token, device: { id: d.id, shop_id: d.shop_id, kind: d.kind } });
 });
 
+/**
+ * Ping: is this device's token still good, and what can the server see?
+ *
+ * Deliberately tiny and unauthenticated-free of the sync machinery. When a
+ * field user reports "cannot sync", this is the first thing to check: it
+ * separates "the phone cannot reach the shop" from "the token was revoked" from
+ * "the token is fine but the data will not apply", which all look identical in
+ * the app.
+ */
+app.get('/api/v1/ping', async (req, res) => {
+  if (!req.device) return res.status(401).json({ error: 'Device token required' });
+  const shopId = req.device.shop_id;
+  try {
+    const counts = {};
+    for (const table of ['customers', 'cash_movements', 'reservations', 'party_ledger']) {
+      const r = await query(
+        `SELECT count(*)::int AS c FROM ${table} WHERE shop_id = $1`, [shopId]
+      );
+      counts[table] = r.rows[0] ? r.rows[0].c : 0;
+    }
+    const dev = await query(
+      'SELECT id, name, kind, last_sync_at, sync_requested_at, created_at FROM devices WHERE id = $1',
+      [req.device.id]
+    );
+    res.json({
+      ok: true,
+      server_time: new Date().toISOString(),
+      device: dev.rows[0] || { id: req.device.id, kind: req.device.kind },
+      counts,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 /** Pull: everything changed since `since` (ms epoch), for this device's shop. */
 app.get('/api/v1/pull', async (req, res) => {
   if (!req.device) return res.status(401).json({ error: 'Device token required' });
@@ -513,7 +548,44 @@ app.get('/api/v1/pull', async (req, res) => {
   } catch (e) {
     console.error('[sync] could not stamp last_sync_at:', e.message);
   }
-  res.json({ cursor: serverNow.getTime(), server_time: serverNow.toISOString(), changes });
+
+  // Carry any outstanding "please sync" note from the shop alongside the data.
+  // Read separately from the stamp above so a failure here cannot break the
+  // download the phone came for.
+  let syncRequestedAt = null;
+  try {
+    const r = await query('SELECT sync_requested_at FROM devices WHERE id = $1', [req.device.id]);
+    syncRequestedAt = r.rows[0] ? r.rows[0].sync_requested_at : null;
+  } catch (e) {
+    console.error('[sync] could not read sync_requested_at:', e.message);
+  }
+
+  res.json({
+    cursor: serverNow.getTime(),
+    server_time: serverNow.toISOString(),
+    sync_requested_at: syncRequestedAt,
+    changes,
+  });
+});
+
+/**
+ * Acknowledge a "please sync" note from the shop.
+ *
+ * The phone cannot be reached, so the shop leaves a timestamp and the phone
+ * clears it once it has actually synced. Echoing the timestamp back means a
+ * phone that retries cannot be made to clear a request the shop has not made
+ * yet.
+ */
+app.post('/api/v1/sync-request/ack', async (req, res) => {
+  if (!req.device) return res.status(401).json({ error: 'Device token required' });
+  const seen = String((req.body && req.body.handled_at) || '');
+  const r = await query(
+    `UPDATE devices SET sync_requested_at = NULL
+      WHERE id = $1 AND sync_requested_at IS NOT NULL
+        AND ($2 = '' OR sync_requested_at <= $2::timestamptz)`,
+    [req.device.id, seen]
+  );
+  res.json({ ok: true, cleared: r.rowCount });
 });
 
 // ─── Last-resort safety nets ────────────────────────────────────────────────

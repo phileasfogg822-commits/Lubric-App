@@ -32,12 +32,16 @@ class SyncSummary {
     required this.pulled,
     required this.rejected,
     required this.queued,
+    this.skipped = 0,
   });
 
   final int pushed;
   final int pulled;
   final int rejected;
   final int queued;
+
+  /// Rows the server sent that would not save on this phone.
+  final int skipped;
 }
 
 /// Push everything queued locally, then pull everything changed on the server.
@@ -66,14 +70,20 @@ class Sync {
     status.value = const SyncStatus(phase: SyncPhase.pushing);
     final queued = await db.pendingOutbox();
     if (queued.isNotEmpty) {
-      final result = await api.push(queued
-          .map((r) => OutboxChange(
-                table: r.table,
-                uuid: r.uuid,
-                op: r.op,
-                row: jsonDecode(r.payload) as Map<String, dynamic>,
-              ))
-          .toList());
+      PushResult result;
+      try {
+        result = await api.push(queued
+            .map((r) => OutboxChange(
+                  table: r.table,
+                  uuid: r.uuid,
+                  op: r.op,
+                  row: jsonDecode(r.payload) as Map<String, dynamic>,
+                ))
+            .toList());
+      } catch (e) {
+        // Upload is the part that must never be lost, so say so plainly.
+        throw ApiException('Could not upload your work: ${_why(e)}');
+      }
 
       pushed = result.applied.length;
       rejected = result.rejected.length;
@@ -82,43 +92,88 @@ class Sync {
           await db.markSynced(row.table, row.uuid);
         }
       }
-      // Rejected rows are dropped from the retry queue so they cannot block
-      // the ones behind them, but the count is surfaced to the user.
+      // Rejected rows are dropped from the retry queue so they cannot block the
+      // ones behind them. A uuid the server mentions but we did not send is
+      // ignored rather than crashing the whole sync on a lookup miss.
       for (final entry in result.rejected.entries) {
-        final row = queued.firstWhere((r) => r.uuid == entry.key);
-        await db.markRejected(row.table, row.uuid);
+        final match = queued.where((r) => r.uuid == entry.key);
+        if (match.isEmpty) continue;
+        await db.markRejected(match.first.table, match.first.uuid);
       }
     }
 
     // ── pull ──
     status.value = SyncStatus(phase: SyncPhase.pulling, pushed: pushed);
-    final incoming = await api.pull(await db.pullCursor());
-    if (incoming.customers.isNotEmpty) {
-      await db.applyRemoteCustomers(incoming.customers);
-      pulled += incoming.customers.length;
+    final cursor = await db.pullCursor();
+    final SyncPull incoming;
+    try {
+      incoming = await api.pull(cursor);
+    } catch (e) {
+      throw ApiException('Could not download from the shop: ${_why(e)}');
+    }
+
+    // One bad row must not abandon the whole download: each is stored on its
+    // own and the first failure is reported, instead of the batch dying with the
+    // cursor stuck so it replays the same data and fails identically forever.
+    String? firstError;
+    int skipped = 0;
+    for (final r in incoming.customers) {
+      try {
+        await db.applyRemoteCustomer(r);
+        pulled++;
+      } catch (e) {
+        skipped++;
+        firstError ??= 'a customer row - ${_why(e)}';
+      }
     }
     for (final r in incoming.reservations) {
-      await db.applyRemoteReservation(r);
-      pulled++;
+      try {
+        await db.applyRemoteReservation(r);
+        pulled++;
+      } catch (e) {
+        skipped++;
+        firstError ??= 'a reservation row - ${_why(e)}';
+      }
     }
-    await db.setPullCursor(incoming.cursor);
+
+    // Only move past what was actually stored.
+    await db.setPullCursor(skipped > 0 ? 0 : incoming.cursor);
     await settings.setLastSync(DateTime.now());
 
+    // Tell the shop we did what it asked. Done after the work, so the note is
+    // cleared by a real sync rather than an attempt.
+    final asked = incoming.syncRequestedAt;
+    if (asked != null && asked.isNotEmpty) {
+      await api.ackSyncRequest(asked);
+    }
+
     final remaining = await db.pendingCount();
+    final message = skipped > 0
+        ? 'Downloaded, but $skipped row(s) would not save on this phone. '
+            'First problem: ${firstError}'
+        : (rejected > 0 ? '$rejected row(s) were refused by the server.' : '');
     status.value = SyncStatus(
       pushed: pushed,
       pulled: pulled,
       rejected: rejected,
-      message: rejected > 0
-          ? '$rejected row(s) were refused by the server.'
-          : '',
+      message: message,
     );
+    await settings.setLastError(message);
     return SyncSummary(
       pushed: pushed,
       pulled: pulled,
       rejected: rejected,
       queued: remaining,
+      skipped: skipped,
     );
+  }
+
+  /// The human-readable part of any error, including the plain database ones
+  /// that used to be flattened into a generic "Sync failed.".
+  static String _why(Object e) {
+    if (e is ApiException) return e.message;
+    final s = e.toString();
+    return s.length > 160 ? '${s.substring(0, 160)}…' : s;
   }
 
   /// Fire-and-forget sync used by the automatic timer and pull-to-refresh.
@@ -127,10 +182,9 @@ class Sync {
     try {
       return await now();
     } catch (e) {
-      status.value = SyncStatus(
-        phase: SyncPhase.failed,
-        message: e is ApiException ? e.message : 'Sync failed.',
-      );
+      final msg = e is ApiException ? e.message : 'Sync failed: ${_why(e)}';
+      status.value = SyncStatus(phase: SyncPhase.failed, message: msg);
+      await settings.setLastError(msg);
       return null;
     }
   }

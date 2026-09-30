@@ -32,7 +32,7 @@ CREATE INDEX IF NOT EXISTS idx_alloc_shop    ON payable_allocations(shop_id, cre
 
 -- Backfill: every existing vendor payment was applied to a single payable
 -- (that is all vendor_payable_id could express), so credit that amount against
--- it. Without this, re-running the backfill would double-count nothing — but
+-- it. Without this, re-running the backfill would double-count nothing - but
 -- invoices already marked paid would show as unsettled in the new query.
 INSERT INTO payable_allocations (shop_id, payment_uuid, vendor_payable_id, amount, created_at)
 SELECT 1, l.uuid, l.vendor_payable_id, l.amount, l.occurred_at
@@ -42,3 +42,4 @@ SELECT 1, l.uuid, l.vendor_payable_id, l.amount, l.occurred_at
    AND NOT EXISTS (
      SELECT 1 FROM payable_allocations a WHERE a.payment_uuid = l.uuid
    );
+

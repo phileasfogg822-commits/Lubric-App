@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../app.dart';
+import '../core/api.dart';
 import '../core/db.dart';
 import '../core/settings.dart';
 import '../core/sync.dart';
@@ -20,6 +21,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   int _pending = 0;
   String _version = '';
+  bool _testing = false;
 
   @override
   void initState() {
@@ -33,6 +35,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _refresh() async {
     final n = await Db.i.pendingCount();
     if (mounted) setState(() => _pending = n);
+  }
+
+  /// Ask the shop, in one line, whether it still knows this phone. Separates
+  /// "no connection" from "the shop does not know this device" from "fine".
+  Future<void> _testConnection() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _testing = true);
+    String result;
+    try {
+      final p = await api.ping();
+      final counts = p.counts.entries.map((e) => '${e.value} ${e.key}').join(', ');
+      result = 'Shop answered.\n'
+          'This device: ${p.deviceName.isEmpty ? '(unnamed)' : p.deviceName}\n'
+          'Shop sees: $counts';
+    } catch (e) {
+      result = 'Could not reach the shop: ${e is ApiException ? e.message : e}';
+    }
+    await _refresh();
+    if (!mounted) return;
+    setState(() => _testing = false);
+    messenger.showSnackBar(
+      SnackBar(content: Text(result), duration: const Duration(seconds: 7)),
+    );
   }
 
   Future<void> _sync() async {
@@ -77,6 +102,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final last = settings.lastSync;
+    final lastError = settings.lastError;
     return Scaffold(
       appBar: AppBar(title: const Text('More')),
       body: ListView(
@@ -92,7 +118,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: const TextStyle(
                           fontSize: 17, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  _row('Server', settings.server),
+                  _row('Server', settings.server.isEmpty ? 'not set' : settings.server),
+                  _row('Device token', settings.tokenHint),
                   _row('Waiting to sync', '$_pending'),
                   _row(
                     'Last sync',
@@ -111,6 +138,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: const Icon(Icons.sync),
             label: const Text('Sync now'),
           ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: _testing ? null : _testConnection,
+            icon: _testing
+                ? const SizedBox(
+                    height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.wifi_tethering),
+            label: const Text('Test connection to shop'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(50),
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          if (lastError.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Card(
+              color: const Color(0xFFFDE7E7),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      const Icon(Icons.error_outline,
+                          size: 18, color: moneyRed),
+                      const SizedBox(width: 6),
+                      Text('Last problem',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, color: moneyRed)),
+                    ]),
+                    const SizedBox(height: 6),
+                    Text(lastError,
+                        style: const TextStyle(fontSize: 12.5, height: 1.45)),
+                  ],
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: () => checkNow(context),

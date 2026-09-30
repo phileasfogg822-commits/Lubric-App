@@ -10,13 +10,71 @@ import { PERMISSIONS, isAdminRole } from "../../lib/permissions";
 import {
   canManageDevices,
   createPairingCode,
+  countPhones,
   listDevices,
+  requestDeviceSync,
   revokeDevice,
   type Device,
   type PendingCode,
 } from "../../lib/pairing";
 import { Page } from "../../components/Page";
 import { FormField } from "../../components/FormField";
+
+/**
+ * "How many phones are connected" in one line.
+ *
+ * The device table below answers the same question in detail, but it scrolls
+ * out of sight and the owner asked for the count to be visible at a glance -
+ * paired phones are the ones that can actually collect and sync right now.
+ */
+function PhoneCountBar({ devices }: { devices: Device[] }) {
+  const { paired, waiting } = countPhones(devices);
+  const desktops = devices.filter((x) => x.kind === "desktop" && x.status === "paired").length;
+  const stale = devices.filter(
+    (x) =>
+      x.kind === "mobile" &&
+      x.status === "paired" &&
+      !!x.sync_requested_at
+  ).length;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 18,
+        flexWrap: "wrap",
+        alignItems: "center",
+        padding: "10px 12px",
+        marginTop: 12,
+        borderRadius: 8,
+        background: "#f8fafc",
+        border: "1px solid #e2e8f0",
+      }}
+    >
+      <span style={{ fontSize: "1.6rem", fontWeight: 800, color: "#0f172a" }}>
+        {paired}
+      </span>
+      <span style={{ fontSize: "0.8rem", color: "#475569" }}>
+        phone{paired === 1 ? "" : "s"} connected
+      </span>
+      {waiting > 0 && (
+        <span className="badge badge-yellow" style={{ fontSize: "0.7rem" }}>
+          {waiting} waiting to pair
+        </span>
+      )}
+      {stale > 0 && (
+        <span className="badge badge-blue" style={{ fontSize: "0.7rem" }}>
+          {stale} asked to sync
+        </span>
+      )}
+      {desktops > 0 && (
+        <span style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
+          {desktops} desktop{desktops === 1 ? "" : "s"}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export default function Shop() {
   const qc = useQueryClient();
@@ -47,6 +105,14 @@ export default function Shop() {
   const revoke = useMutation({
     mutationFn: (id: number) => revokeDevice(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["devices"] }),
+    onError: (e: any) => setPairError(e?.message || String(e)),
+  });
+  const fetchFromPhone = useMutation({
+    mutationFn: (id: number) => requestDeviceSync(id),
+    onSuccess: () => {
+      setPairError("");
+      qc.invalidateQueries({ queryKey: ["devices"] });
+    },
     onError: (e: any) => setPairError(e?.message || String(e)),
   });
   const { data: settings } = useQuery({ queryKey: ["shop_settings"], queryFn: () => dbSelect<any>("SELECT * FROM settings").then(r => { const obj: any = {}; r.forEach((row: any) => { obj[row.key] = row.value; }); return obj; }) });
@@ -192,51 +258,64 @@ export default function Shop() {
           ) : devicesQ.isLoading ? (
             <div style={{ padding: 12, color: "#64748b" }}>Loading devices…</div>
           ) : devicesQ.data?.length ? (
-            <table className="table" style={{ marginTop: 14 }}>
-              <thead>
-                <tr>
-                  <th>Device</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>Last sync</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {devicesQ.data.map((dv: Device) => (
-                  <tr key={dv.id}>
-                    <td style={{ fontWeight: 500 }}>{dv.name || `Device #${dv.id}`}</td>
-                    <td>{dv.kind === "mobile" ? "Phone" : "Desktop"}</td>
-                    <td>
-                      <span
-                        className={`badge ${
-                          dv.status === "paired" ? "badge-green" : dv.status === "waiting" ? "badge-yellow" : "badge-gray"
-                        }`}
-                      >
-                        {dv.status === "paired" ? "Paired" : dv.status === "waiting" ? "Waiting for setup" : "Revoked"}
-                      </span>
-                    </td>
-                    <td style={{ fontSize: "0.8rem", color: "#64748b" }}>
-                      {dv.last_sync_at ? d(dv.last_sync_at) : "never"}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {dv.status !== "revoked" && (
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => {
-                            if (confirm(`Remove "${dv.name || "this device"}"?\n\nIt stops syncing immediately. Use this if the phone is lost or sold.`)) {
-                              revoke.mutate(dv.id);
-                            }
-                          }}
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </td>
+            <>
+              <PhoneCountBar devices={devicesQ.data} />
+              <table className="table" style={{ marginTop: 14 }}>
+                <thead>
+                  <tr>
+                    <th>Device</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Last sync</th>
+                    <th />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {devicesQ.data.map((dv: Device) => (
+                    <tr key={dv.id}>
+                      <td style={{ fontWeight: 500 }}>{dv.name || `Device #${dv.id}`}</td>
+                      <td>{dv.kind === "mobile" ? "Phone" : "Desktop"}</td>
+                      <td>
+                        <span
+                          className={`badge ${
+                            dv.status === "paired" ? "badge-green" : dv.status === "waiting" ? "badge-yellow" : "badge-gray"
+                          }`}
+                        >
+                          {dv.status === "paired" ? "Paired" : dv.status === "waiting" ? "Waiting for setup" : "Revoked"}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: "0.8rem", color: "#64748b" }}>
+                        {dv.last_sync_at ? d(dv.last_sync_at) : "never"}
+                      </td>
+                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                        {dv.kind === "mobile" && dv.status === "paired" && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            title="Ask this phone to send its data now. The phone does this the next time it has a connection."
+                            disabled={fetchFromPhone.isPending || !!dv.sync_requested_at}
+                            onClick={() => fetchFromPhone.mutate(dv.id)}
+                          >
+                            {dv.sync_requested_at ? "Asked ✓" : "Fetch data"}
+                          </button>
+                        )}
+                        {dv.status !== "revoked" && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => {
+                              if (confirm(`Remove "${dv.name || "this device"}"?\n\nIt stops syncing immediately. Use this if the phone is lost or sold.`)) {
+                                revoke.mutate(dv.id);
+                              }
+                            }}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           ) : (
             <div style={{ padding: 12, fontSize: "0.8rem", color: "#64748b" }}>
               No phones attached yet.

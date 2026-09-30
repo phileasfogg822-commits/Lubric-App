@@ -182,6 +182,86 @@ await check('a revoked phone cannot pair', async () => {
   await post('/api/execute', { sql: 'DELETE FROM devices WHERE id = $1', params: [id] }, atok);
 });
 
+await check('the shop can see how many phones are connected', async () => {
+  // Exactly the query src/lib/pairing.ts listDevices() runs. It is here because
+  // that query shipped with `ORDER BY (revoked ASC), (pairing_code IS NOT NULL
+  // DESC)`, which Postgres rejects - a direction can only qualify a column
+  // name. The Phones & Devices panel was dead on arrival and nothing caught it,
+  // because the desktop tests run on SQLite, which accepts the same text.
+  const rows = await q(
+    `SELECT id, kind, name, pairing_code, last_sync_at, created_at, revoked,
+            sync_requested_at,
+            (revoked OR pairing_code IS NOT NULL) AS needs_attention
+       FROM devices
+      ORDER BY needs_attention DESC, id DESC`,
+    [], atok
+  );
+  assert(rows.length > 0, 'expected the shop to have devices');
+  assert('needs_attention' in rows[0], 'needs_attention is missing from the result');
+});
+
+await check('the shop can ask a phone to sync, and the phone is told', async () => {
+  await post('/api/execute', {
+    sql: 'UPDATE devices SET sync_requested_at = NOW() WHERE id = $1', params: [deviceId],
+  }, atok);
+  const res = await fetch(BASE + '/api/v1/pull?since=0', { headers: { Authorization: 'Bearer ' + token } });
+  const data = await res.json();
+  assert(res.status === 200, 'pull failed: ' + JSON.stringify(data).slice(0, 120));
+  assert(data.sync_requested_at, 'the pull did not carry the shop\'s request to the phone');
+});
+
+await check('the phone clears the note once it has synced', async () => {
+  const res = await fetch(BASE + '/api/v1/pull?since=0', { headers: { Authorization: 'Bearer ' + token } });
+  const { sync_requested_at: asked } = await res.json();
+  assert(asked, 'expected an outstanding request to acknowledge');
+
+  const ack = await post('/api/v1/sync-request/ack', { handled_at: asked }, token);
+  assert(ack.status === 200, 'ack failed: ' + JSON.stringify(ack.body));
+  assert(ack.body.cleared === 1, 'expected to clear exactly one request, got ' + ack.body.cleared);
+
+  const [row] = await q('SELECT sync_requested_at FROM devices WHERE id = $1', [deviceId], atok);
+  assert(row.sync_requested_at === null, 'the note survived the ack');
+});
+
+await check('a stale ack cannot clear a request the shop has not made', async () => {
+  await post('/api/execute', {
+    sql: 'UPDATE devices SET sync_requested_at = NOW() WHERE id = $1', params: [deviceId],
+  }, atok);
+  // A timestamp from before the request above: the phone is behind, not wrong.
+  const ack = await post('/api/v1/sync-request/ack', { handled_at: '2020-01-01T00:00:00Z' }, token);
+  assert(ack.status === 200, 'ack failed: ' + JSON.stringify(ack.body));
+  assert(ack.body.cleared === 0, 'a stale ack cleared a newer request');
+  const [row] = await q('SELECT sync_requested_at FROM devices WHERE id = $1', [deviceId], atok);
+  assert(row.sync_requested_at !== null, 'the fresh request was wrongly cleared');
+  await post('/api/execute', {
+    sql: 'UPDATE devices SET sync_requested_at = NULL WHERE id = $1', params: [deviceId],
+  }, atok);
+});
+
+await check('a phone can tell whether the shop still knows it', async () => {
+  const anon = await fetch(BASE + '/api/v1/ping');
+  assert(anon.status === 401, 'ping must not answer without a token, got ' + anon.status);
+
+  const res = await fetch(BASE + '/api/v1/ping', { headers: { Authorization: 'Bearer ' + token } });
+  const data = await res.json();
+  assert(res.status === 200, 'ping failed: ' + JSON.stringify(data).slice(0, 120));
+  assert(data.ok === true, 'ping did not report ok');
+  assert(data.device && data.device.id === deviceId, 'ping returned the wrong device');
+  assert(data.counts && typeof data.counts.customers === 'number',
+    'ping did not report the shop\'s row counts');
+});
+
+await check('a revoked phone cannot ping the shop', async () => {
+  await post('/api/execute', {
+    sql: 'UPDATE devices SET revoked = TRUE WHERE id = $1', params: [deviceId],
+  }, atok);
+  const res = await fetch(BASE + '/api/v1/ping', { headers: { Authorization: 'Bearer ' + token } });
+  assert(res.status === 401, 'a revoked device must not be served, got ' + res.status);
+  await post('/api/execute', {
+    sql: 'UPDATE devices SET revoked = FALSE WHERE id = $1', params: [deviceId],
+  }, atok);
+});
+
 await check('cleanup', async () => {
   if (deviceId) {
     await post('/api/execute', { sql: 'DELETE FROM devices WHERE id = $1', params: [deviceId] }, atok);

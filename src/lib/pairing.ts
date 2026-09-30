@@ -30,6 +30,8 @@ export interface Device {
   status: DeviceStatus;
   last_sync_at: string | null;
   created_at: string;
+  /** Set when the shop has asked this device to sync and it has not yet. */
+  sync_requested_at?: string | null;
 }
 
 export interface PendingCode {
@@ -50,9 +52,14 @@ export function canManageDevices(): boolean {
  */
 export async function listDevices(): Promise<Device[]> {
   const rows = await dbSelect<any>(
-    `SELECT id, kind, name, pairing_code, last_sync_at, created_at, revoked
+    // Sort keys in a SELECT list, not in ORDER BY: Postgres does not accept a
+    // bare `ORDER BY (boolean ASC)` - a direction can only qualify a column
+    // name, so the expression form is a syntax error.
+    `SELECT id, kind, name, pairing_code, last_sync_at, created_at, revoked,
+            sync_requested_at,
+            (revoked OR pairing_code IS NOT NULL) AS needs_attention
        FROM devices
-      ORDER BY (revoked ASC), (pairing_code IS NOT NULL DESC), id DESC`
+      ORDER BY needs_attention DESC, id DESC`
   );
   return rows.map((r) => ({
     id: Number(r.id),
@@ -61,7 +68,29 @@ export async function listDevices(): Promise<Device[]> {
     status: r.revoked ? "revoked" : r.pairing_code ? "waiting" : "paired",
     last_sync_at: r.last_sync_at ? String(r.last_sync_at) : null,
     created_at: String(r.created_at ?? ""),
+    sync_requested_at: r.sync_requested_at ? String(r.sync_requested_at) : null,
   }));
+}
+
+/** How many phones are attached and usable right now. */
+export function countPhones(devices: Device[]): { paired: number; waiting: number } {
+  return {
+    paired: devices.filter((d) => d.kind === "mobile" && d.status === "paired").length,
+    waiting: devices.filter((d) => d.kind === "mobile" && d.status === "waiting").length,
+  };
+}
+
+/**
+ * Ask a phone to sync now.
+ *
+ * A phone is behind the shop's NAT and holds no open connection, so the server
+ * cannot reach into it. What this does is leave a timestamp that the phone picks
+ * up the next time it syncs - typically within a minute of it opening the app,
+ * since it syncs on start. It is a nudge, not a remote trigger, and the UI says
+ * so rather than implying the data has already moved.
+ */
+export async function requestDeviceSync(id: number): Promise<void> {
+  await dbExecute("UPDATE devices SET sync_requested_at = NOW() WHERE id = $1", [id]);
 }
 
 /**

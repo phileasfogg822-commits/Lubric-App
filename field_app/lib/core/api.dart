@@ -53,6 +53,36 @@ class Api {
     }
   }
 
+  /// Is this device's token still accepted, and what does the shop see?
+  ///
+  /// The cheapest possible round trip, so the diagnostics screen can tell
+  /// "the phone cannot reach the shop" apart from "the shop does not know this
+  /// device any more" - both of which otherwise read as "cannot sync".
+  Future<PingResult> ping() async {
+    try {
+      final res = await _dio.get<Object?>(url('/api/v1/ping'), options: _authed);
+      return PingResult.fromJson(Map<String, dynamic>.from(res.data as Map));
+    } on DioException catch (e) {
+      throw ApiException(_explain(e));
+    }
+  }
+
+  /// Clear the shop's "please sync" note once we have actually synced.
+  ///
+  /// Best effort by design: a failure to acknowledge must never turn a
+  /// successful sync into an error, it just leaves the note standing.
+  Future<void> ackSyncRequest(String handledAt) async {
+    try {
+      await _dio.post<Object?>(
+        url('/api/v1/sync-request/ack'),
+        options: _authed,
+        data: {'handled_at': handledAt},
+      );
+    } on DioException {
+      // Ignored on purpose - see above.
+    }
+  }
+
   /// Everything changed since [since] (a server timestamp cursor).
   Future<SyncPull> pull(int since) async {
     try {
@@ -142,12 +172,54 @@ class PushResult {
   }
 }
 
+/// The shop's answer to "are you still talking to me, and do you know me?".
+class PingResult {
+  PingResult({
+    required this.ok,
+    required this.serverTime,
+    required this.deviceName,
+    required this.lastSyncAt,
+    required this.counts,
+  });
+
+  final bool ok;
+  final String serverTime;
+  final String deviceName;
+  final String? lastSyncAt;
+  final Map<String, int> counts;
+
+  factory PingResult.fromJson(Map<String, dynamic> json) {
+    final device = Map<String, dynamic>.from(
+        (json['device'] as Map?) ?? const <String, dynamic>{});
+    final raw = Map<String, dynamic>.from(
+        (json['counts'] as Map?) ?? const <String, dynamic>{});
+    return PingResult(
+      ok: json['ok'] == true,
+      serverTime: (json['server_time'] ?? '').toString(),
+      deviceName: (device['name'] ?? '').toString(),
+      lastSyncAt: device['last_sync_at']?.toString(),
+      counts: {
+        for (final e in raw.entries)
+          e.key: (e.value as num?)?.toInt() ?? 0,
+      },
+    );
+  }
+}
+
 class SyncPull {
-  SyncPull({required this.cursor, required this.customers, required this.reservations});
+  SyncPull({
+    required this.cursor,
+    required this.customers,
+    required this.reservations,
+    this.syncRequestedAt,
+  });
 
   final int cursor;
   final List<Map<String, dynamic>> customers;
   final List<Map<String, dynamic>> reservations;
+
+  /// When the shop last asked this phone to sync, if it is asking.
+  final String? syncRequestedAt;
 
   factory SyncPull.fromJson(Map<String, dynamic> json) {
     final changes = Map<String, dynamic>.from(json['changes'] as Map? ?? const {});
@@ -160,6 +232,7 @@ class SyncPull {
           DateTime.now().millisecondsSinceEpoch,
       customers: rows('customers'),
       reservations: rows('reservations'),
+      syncRequestedAt: json['sync_requested_at']?.toString(),
     );
   }
 }

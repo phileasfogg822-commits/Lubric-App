@@ -183,22 +183,26 @@ class Db {
     return rows.map(Reservation.fromMap).toList();
   }
 
-  /// Server rows always win: the shop is the source of truth for status
-  /// (e.g. "fulfilled" once the sale is posted in the till).
+  /// Store one reservation from the shop. Server rows win: the shop is the
+  /// source of truth for status (e.g. "fulfilled" once the sale is posted in
+  /// the till). Each field is type-checked, because a NULL or a number where a
+  /// string is expected is exactly what turns a whole sync into a silent
+  /// no-op forever.
   Future<void> applyRemoteReservation(Map<String, dynamic> row) async {
     final uuid = row['uuid'] as String?;
-    if (uuid == null) return;
+    if (uuid == null || uuid.isEmpty) return;
+    String text(String key, [String fallback = '']) =>
+        (row[key] ?? fallback) is String ? row[key] as String : fallback;
     await _db.insert(
       'reservations',
       {
         'uuid': uuid,
-        'customer_name': (row['customer_name'] ?? '') as String,
-        'items_json': (row['items_json'] ?? '[]') as String,
+        'customer_name': text('customer_name'),
+        'items_json': text('items_json', '[]'),
         'amount': (row['amount'] as num?)?.toDouble() ?? 0,
-        'status': (row['status'] ?? 'open') as String,
-        'note': (row['note'] ?? '') as String,
-        'created_at':
-            (row['created_at'] ?? DateTime.now().toIso8601String()) as String,
+        'status': text('status', 'open'),
+        'note': text('note'),
+        'created_at': text('created_at', DateTime.now().toIso8601String()),
         'synced': 1,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
@@ -207,26 +211,28 @@ class Db {
 
   // -- reference data from the shop -----------------------------------------
 
-  Future<void> applyRemoteCustomers(List<Map<String, dynamic>> rows) async {
-    final now = DateTime.now().toIso8601String();
-    final b = _db.batch();
-    for (final r in rows) {
-      final uuid = r['uuid'] as String?;
-      if (uuid == null) continue;
-      b.insert(
-        'customers',
-        {
-          'uuid': uuid,
-          'name': (r['name'] ?? '') as String,
-          'phone': (r['phone'] ?? '') as String,
-          'customer_type': (r['customer_type'] ?? '') as String,
-          'credit_balance': (r['credit_balance'] as num?)?.toDouble() ?? 0,
-          'synced_at': now,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-    }
-    await b.commit(noResult: true);
+  /// Store one customer from the shop, on its own.
+  ///
+  /// Deliberately one row per call rather than a batch: a single row that the
+  /// phone cannot accept (a type the SQLite column does not expect, say) then
+  /// only loses itself, and the sync can report which row and why instead of
+  /// throwing on the whole download and replaying it forever.
+  Future<void> applyRemoteCustomer(Map<String, dynamic> r) async {
+    final uuid = r['uuid'] as String?;
+    if (uuid == null || uuid.isEmpty) return;
+    await _db.insert(
+      'customers',
+      {
+        'uuid': uuid,
+        'name': (r['name'] ?? '') is String ? r['name'] : '',
+        'phone': (r['phone'] ?? '') is String ? r['phone'] : '',
+        'customer_type':
+            (r['customer_type'] ?? '') is String ? r['customer_type'] : '',
+        'credit_balance': (r['credit_balance'] as num?)?.toDouble() ?? 0,
+        'synced_at': DateTime.now().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   Future<List<Customer>> customers({String search = ''}) async {

@@ -1,0 +1,13 @@
+-- 018_sync_requested_at.sql — let the shop ask a phone to sync on demand.
+--
+-- A field phone sits behind the shop's NAT, so the server cannot open a
+-- connection to it. What it CAN do is leave a note that the phone picks up on
+-- its next sync - the only honest way to offer "fetch this phone's data" for a
+-- device that is not listening for connections.
+--
+-- A timestamp rather than a boolean, so the phone can tell a fresh request from
+-- one it already handled (it reports the last one it saw and the server only
+-- acts on a later one), and so the shop can see how long a phone has been
+-- ignoring the request.
+-- Fully idempotent.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS sync_requested_at TIMESTAMPTZ;
