@@ -102,26 +102,45 @@ jobs:
         run: |
           set -euo pipefail
           APK=build/app/outputs/flutter-apk/app-release.apk
-          CERT=$(unzip -Z1 "$APK" | grep -iE '^META-INF/.*\.(RSA|DSA|EC)$' | head -1 || true)
-          if [ -z "$CERT" ]; then
-            echo "::error::release APK has no v1 signature block - it was never signed"
+
+          # apksigner is authoritative: it reports the certificate that actually
+          # signs the APK, including v2/v3-only signatures that have no v1
+          # META-INF block at all. Reading a cert out of META-INF by hand can pick
+          # a timestamp-authority cert from the PKCS#7 bag instead of the signer.
+          APKSIGNER="$(ls -d "${ANDROID_HOME}"/build-tools/*/apksigner 2>/dev/null | tail -1 || true)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::apksigner not found under ANDROID_HOME=${ANDROID_HOME:-unset}"
             exit 1
           fi
-          GOT=$(unzip -p "$APK" "$CERT" | openssl pkcs7 -inform DER -print_certs 2>/dev/null \
-                | openssl x509 -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)
-          echo "    signing certificate: $GOT"
-          if [ -n "$EXPECTED_FINGERPRINT" ]; then
-            if [ "$GOT" != "$EXPECTED_FINGERPRINT" ]; then
-              echo "::error::this APK is signed with the WRONG key, so no phone can"
-              echo "::error::install it over the current one without being wiped first."
-              echo "::error::expected: $EXPECTED_FINGERPRINT"
-              exit 1
-            fi
-            echo "    matches the shop's release key"
-          else
-            echo "::warning::repo variable LUBRIC_KEY_FINGERPRINT is unset, so the"
-            echo "::warning::certificate was NOT verified against a known value."
+
+          echo "    every certificate carried in the APK:"
+          for f in $(unzip -Z1 "$APK" | grep -iE '^META-INF/.*\.(RSA|DSA|EC)$' || true); do
+            fp=$(unzip -p "$APK" "$f" | openssl pkcs7 -inform DER -print_certs 2>/dev/null \
+                 | openssl x509 -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)
+            echo "      $f -> ${fp:-<unreadable>}"
+          done
+
+          GOT=$("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null \
+                | sed -n 's/.*SHA-256 digest: //p' | head -1)
+          if [ -z "$GOT" ]; then
+            echo "::error::could not read a signing certificate from the APK"
+            exit 1
           fi
+          echo "    apksigner says the signer is: $GOT"
+
+          # keytool prints upper-case hex, apksigner lower-case. Compare the
+          # hex only, case-insensitively, with the separators stripped.
+          norm() { echo "$1" | tr '[:upper:]' '[:lower:]' | tr -d ':'; }
+          if [ "$(norm "$GOT")" != "$(norm "$EXPECTED_FINGERPRINT")" ]; then
+            echo "::error::this APK is signed with the WRONG key, so no phone can"
+            echo "::error::install it over the current one without being wiped first."
+            echo "::error::apksigner: $GOT"
+            echo "::error::expected:  $EXPECTED_FINGERPRINT"
+            echo "::error::if the keystore secret is wrong, re-upload it - see"
+            echo "::error::field_app/SIGNING.md for how to recover the real key."
+            exit 1
+          fi
+          echo "    matches the shop's release key"
 
       # Read the manifest back OUT of the signed APK and assert that everything
       # the app needs to make a network request is really in the compiled
