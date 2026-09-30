@@ -572,18 +572,29 @@ app.get('/api/v1/pull', async (req, res) => {
  * Acknowledge a "please sync" note from the shop.
  *
  * The phone cannot be reached, so the shop leaves a timestamp and the phone
- * clears it once it has actually synced. Echoing the timestamp back means a
- * phone that retries cannot be made to clear a request the shop has not made
- * yet.
+ * clears it by syncing. Rather than trusting a timestamp echoed back by the
+ * phone, this compares two columns the server owns: the note is only cleared
+ * when the device has actually synced (last_sync_at, stamped by /pull) at or
+ * after the moment the note was left.
+ *
+ * The echoed-timestamp version of this was wrong. Postgres keeps microseconds
+ * on NOW() but JSON.stringify serialises a Date to milliseconds, so the value
+ * the phone received was always a hair earlier than the stored one, the
+ * comparison was false, and the note could never be cleared. It also removes
+ * the need to trust client input for the decision at all.
+ *
+ * A note left after the phone's last sync is deliberately kept: that phone has
+ * not seen it yet.
  */
 app.post('/api/v1/sync-request/ack', async (req, res) => {
   if (!req.device) return res.status(401).json({ error: 'Device token required' });
-  const seen = String((req.body && req.body.handled_at) || '');
   const r = await query(
     `UPDATE devices SET sync_requested_at = NULL
-      WHERE id = $1 AND sync_requested_at IS NOT NULL
-        AND ($2 = '' OR sync_requested_at <= $2::timestamptz)`,
-    [req.device.id, seen]
+      WHERE id = $1
+        AND sync_requested_at IS NOT NULL
+        AND last_sync_at IS NOT NULL
+        AND last_sync_at >= sync_requested_at`,
+    [req.device.id]
   );
   res.json({ ok: true, cleared: r.rowCount });
 });

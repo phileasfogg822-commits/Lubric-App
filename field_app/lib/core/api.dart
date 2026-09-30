@@ -69,14 +69,16 @@ class Api {
 
   /// Clear the shop's "please sync" note once we have actually synced.
   ///
-  /// Best effort by design: a failure to acknowledge must never turn a
-  /// successful sync into an error, it just leaves the note standing.
-  Future<void> ackSyncRequest(String handledAt) async {
+  /// The server decides whether to clear it, from its own record of when this
+  /// device last synced - the phone sends no timestamp, because a round-tripped
+  /// one loses the microseconds Postgres stores and never compares equal.
+  /// Best effort by design: failing to acknowledge must never turn a successful
+  /// sync into an error, it just leaves the note standing.
+  Future<void> ackSyncRequest() async {
     try {
       await _dio.post<Object?>(
         url('/api/v1/sync-request/ack'),
         options: _authed,
-        data: {'handled_at': handledAt},
       );
     } on DioException {
       // Ignored on purpose - see above.

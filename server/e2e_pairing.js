@@ -212,10 +212,10 @@ await check('the shop can ask a phone to sync, and the phone is told', async () 
 
 await check('the phone clears the note once it has synced', async () => {
   const res = await fetch(BASE + '/api/v1/pull?since=0', { headers: { Authorization: 'Bearer ' + token } });
-  const { sync_requested_at: asked } = await res.json();
-  assert(asked, 'expected an outstanding request to acknowledge');
+  const data = await res.json();
+  assert(data.sync_requested_at, 'expected an outstanding request to acknowledge');
 
-  const ack = await post('/api/v1/sync-request/ack', { handled_at: asked }, token);
+  const ack = await post('/api/v1/sync-request/ack', {}, token);
   assert(ack.status === 200, 'ack failed: ' + JSON.stringify(ack.body));
   assert(ack.body.cleared === 1, 'expected to clear exactly one request, got ' + ack.body.cleared);
 
@@ -223,19 +223,24 @@ await check('the phone clears the note once it has synced', async () => {
   assert(row.sync_requested_at === null, 'the note survived the ack');
 });
 
-await check('a stale ack cannot clear a request the shop has not made', async () => {
+await check('a note left after the phone last synced is kept', async () => {
+  // The phone pulled a moment ago, so last_sync_at is older than this new note.
+  // Clearing it here would tell the shop its request had been answered when the
+  // phone had not even seen it yet.
   await post('/api/execute', {
     sql: 'UPDATE devices SET sync_requested_at = NOW() WHERE id = $1', params: [deviceId],
   }, atok);
-  // A timestamp from before the request above: the phone is behind, not wrong.
-  const ack = await post('/api/v1/sync-request/ack', { handled_at: '2020-01-01T00:00:00Z' }, token);
+  const ack = await post('/api/v1/sync-request/ack', {}, token);
   assert(ack.status === 200, 'ack failed: ' + JSON.stringify(ack.body));
-  assert(ack.body.cleared === 0, 'a stale ack cleared a newer request');
+  assert(ack.body.cleared === 0, 'a request the phone never saw was cleared');
+
   const [row] = await q('SELECT sync_requested_at FROM devices WHERE id = $1', [deviceId], atok);
-  assert(row.sync_requested_at !== null, 'the fresh request was wrongly cleared');
-  await post('/api/execute', {
-    sql: 'UPDATE devices SET sync_requested_at = NULL WHERE id = $1', params: [deviceId],
-  }, atok);
+  assert(row.sync_requested_at !== null, 'the unseen request was wrongly cleared');
+
+  // After the phone syncs again the note is genuinely handled and goes.
+  await fetch(BASE + '/api/v1/pull?since=0', { headers: { Authorization: 'Bearer ' + token } });
+  const second = await post('/api/v1/sync-request/ack', {}, token);
+  assert(second.body.cleared === 1, 'the note should clear after a later sync, got ' + second.body.cleared);
 });
 
 await check('a phone can tell whether the shop still knows it', async () => {

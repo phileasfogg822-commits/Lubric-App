@@ -144,7 +144,7 @@ class Sync {
     // cleared by a real sync rather than an attempt.
     final asked = incoming.syncRequestedAt;
     if (asked != null && asked.isNotEmpty) {
-      await api.ackSyncRequest(asked);
+      await api.ackSyncRequest();
     }
 
     final remaining = await db.pendingCount();
