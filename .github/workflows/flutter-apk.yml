@@ -168,15 +168,20 @@ jobs:
           echo "    matches the shop's release key"
 
       # Read the manifest back OUT of the signed APK and assert that everything
-      # the app needs to make a network request is really in the compiled
-      # binary. A silently-ignored patch step is exactly what shipped two
-      # broken builds in a row, so the build now fails loudly instead of
-      # shipping an app that cannot reach the server.
+      # the app needs to make a network request - or to install an update - is
+      # really in the compiled binary. A silently-ignored patch step is exactly
+      # what shipped two broken builds in a row, so the build now fails loudly
+      # instead of shipping an app that cannot reach the server.
       #
       #   1. android.permission.INTERNET  - Flutter omits it from release
       #      manifests, so without it no request can be made at all.
       #   2. android:networkSecurityConfig - required for a plain http:// URL.
-      - name: Verify the APK can actually make network requests
+      #   3. android.permission.REQUEST_INSTALL_PACKAGES - Android 8+ refuses
+      #      the install intent without it, and refuses SILENTLY: the download
+      #      finishes, nothing happens, and the user has no error to read. That
+      #      is precisely the reported bug ("it showed the update but didnt run
+      #      the file after downloading").
+      - name: Verify the APK can reach the server and install updates
         working-directory: field_app
         run: |
           set -euo pipefail
@@ -203,12 +208,19 @@ jobs:
             echo "::error::the app will be unable to reach an http:// server"
             fail=1
           fi
+          if ! grep -q "REQUEST_INSTALL_PACKAGES" permissions.txt; then
+            echo "::error::APK is missing REQUEST_INSTALL_PACKAGES - Android"
+            echo "::error::will silently refuse to install a downloaded update,"
+            echo "::error::which looks exactly like a broken updater."
+            fail=1
+          fi
           if [ "$fail" -ne 0 ]; then
             echo "--- manifest dump ---"
             cat manifest.txt
             exit 1
           fi
-          echo "OK: INTERNET permission present and cleartext HTTP permitted"
+          echo "OK: INTERNET present, cleartext HTTP permitted, and the app may"
+          echo "OK: launch the installer for its own updates"
 
       - name: Checksum
         working-directory: field_app

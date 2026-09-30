@@ -1,0 +1,50 @@
+{
+  "_about": "Golden payloads for the field app's outbox. Read by BOTH field_app/test/outbox_payload_test.dart and server/e2e_payload.js, so the phone and the shop are asserted against the same bytes and the two halves of the sync protocol cannot drift apart again. Bump _version when a payload shape changes.",
+  "_version": 1,
+  "movement": {
+    "table": "cash_movements",
+    "row": {
+      "uuid": "e820ccc8-c513-4479-a6ff-a333485b0789",
+      "kind": "collection",
+      "amount": 600,
+      "customer_name": "Ali \"Raza\" & Sons",
+      "note": "paid in cash\nsecond line",
+      "occurred_at": "2026-09-30T19:21:20.409Z",
+      "origin": "mobile"
+    },
+    "local_row": {
+      "uuid": "e820ccc8-c513-4479-a6ff-a333485b0789",
+      "kind": "collection",
+      "amount": 600,
+      "customer_uuid": "c-1",
+      "customer_name": "Ali \"Raza\" & Sons",
+      "note": "paid in cash\nsecond line",
+      "occurred_at": "2026-09-30T19:21:20.409Z",
+      "synced": 0
+    }
+  },
+  "reservation": {
+    "table": "reservations",
+    "row": {
+      "uuid": "6b1f0e4a-7d8f-4c11-9a2e-0c3d5b7e9f10",
+      "customer_name": "Hassan Traders",
+      "items_json": "[{\"name\":\"Shell HX7 4L\",\"qty\":2}]",
+      "amount": 15000,
+      "status": "open",
+      "note": "",
+      "origin": "mobile"
+    },
+    "local_row": {
+      "uuid": "6b1f0e4a-7d8f-4c11-9a2e-0c3d5b7e9f10",
+      "customer_name": "Hassan Traders",
+      "items_json": "[{\"name\":\"Shell HX7 4L\",\"qty\":2}]",
+      "amount": 15000,
+      "status": "open",
+      "note": "",
+      "created_at": "2026-09-30T19:21:20.409Z",
+      "synced": 0
+    }
+  },
+  "hostile_name": "قمر \"قمر\" \\ \\n\ttab 😀 ٪",
+  "broken_v1_payload": "{\"uuid\":e820ccc8-c513-4479-a6ff-a333485b0789,\"kind\":collection,\"amount\":600,\"customer_name\":\"x\",\"note\":\"y\",\"occurred_at\":\"2026-09-30T19:21:20.409Z\",\"origin\":\"mobile\"}"
+}

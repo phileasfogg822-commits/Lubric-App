@@ -59,6 +59,22 @@ NETWORK_CONFIG = """<?xml version="1.0" encoding="utf-8"?>
 PERMISSION = '<uses-permission android:name="android.permission.INTERNET" />'
 ATTRIBUTE = 'android:networkSecurityConfig="@xml/network_security_config"'
 
+# ── in-app updating ──────────────────────────────────────────────────────────
+# 4. Android 8 (API 26) requires REQUEST_INSTALL_PACKAGES before an app may ask
+#    the system to install a package. Without it the install intent is refused
+#    and NOTHING visible happens: the download completes, the dialog closes, and
+#    the update never installs. That is exactly what was reported.
+#
+#    Deliberately NOT added here: a FileProvider. `open_filex` already declares
+#    one (authority ${applicationId}.fileProvider.com.crazecoder.openfile) and
+#    its filepaths.xml already covers the cache, files, external-files and
+#    external-cache directories - every location this app downloads to. Adding a
+#    second provider would be dead weight at best and a manifest-merge conflict
+#    at worst, so the fix is the permission alone.
+INSTALL_PERMISSION = (
+    '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />'
+)
+
 # ── release signing ──────────────────────────────────────────────────────────
 # Read by the block injected into build.gradle. Kept as one string so the exact
 # text that lands in the Gradle file is reviewable here.
@@ -95,7 +111,7 @@ CONDITIONAL_SIGNING = (
 
 
 def patch_manifest(source: str) -> str:
-    """Steps 1 and 2: the INTERNET permission and the cleartext config."""
+    """Steps 1, 2 and 4: network access and permission to install updates."""
     # --- 1. INTERNET permission ------------------------------------------
     # Without this a release APK cannot make ANY network request.
     if "android.permission.INTERNET" not in source:
@@ -122,6 +138,21 @@ def patch_manifest(source: str) -> str:
             raise SystemExit("ERROR: no <application> tag found in the manifest")
         source = patched
         print("ADDED android:networkSecurityConfig to the manifest")
+
+    # --- 4. permission to install the downloaded update -------------------
+    # See the note on INSTALL_PERMISSION: without this the install intent is
+    # refused and the update silently never happens.
+    if "android.permission.REQUEST_INSTALL_PACKAGES" not in source:
+        patched, count = re.subn(
+            r"[ \t]*<application\b",
+            "    " + INSTALL_PERMISSION + "\n    <application",
+            source,
+            count=1,
+        )
+        if count == 0:
+            raise SystemExit("ERROR: no <application> tag found in the manifest")
+        source = patched
+        print("ADDED android.permission.REQUEST_INSTALL_PACKAGES")
     return source
 
 
@@ -233,6 +264,13 @@ def main() -> int:
     # no-op here is exactly the bug this script exists to prevent.
     print("--- INTERNET permission present? ---")
     print("android.permission.INTERNET" in source)
+    print("--- in-app update requirements ---")
+    print(
+        "REQUEST_INSTALL_PACKAGES:",
+        "android.permission.REQUEST_INSTALL_PACKAGES" in source,
+    )
+    # open_filex supplies the FileProvider and the filepaths.xml it needs, so
+    # this is a read-only sanity check rather than something we patch.
     print("--- manifest <application> tag ---")
     tag = re.search(r"<application.*?>", source, re.S)
     print(tag.group(0) if tag else "(not found)")

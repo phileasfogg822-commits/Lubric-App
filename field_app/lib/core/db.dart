@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 import '../models/models.dart';
+import 'outbox_payload.dart';
 
 /// Offline-first store. Every write lands here first and is queued in
 /// `outbox`; the server is just a replica. Nothing in this file needs a
@@ -17,11 +20,99 @@ class Db {
     final dir = await getDatabasesPath();
     final db = await openDatabase(
       p.join(dir, 'lubric_field.db'),
-      version: 1,
+      // Bump this AND add a matching step in _upgrade for every schema change.
+      // Without an onUpgrade, an existing install keeps its old tables forever
+      // and every query against a new column fails with "no such column", which
+      // looks like a code bug rather than a migration that never ran.
+      version: 2,
       onCreate: (d, _) => _createSchema(d),
+      onUpgrade: _upgrade,
     );
     return _instance = Db._(db);
   }
+
+  /// Bring an existing database up to the current schema.
+  ///
+  /// Written to be additive and safe to re-run, because a phone that fails to
+  /// migrate is a phone that cannot upload its work.
+  static Future<void> _upgrade(Database d, int from, int to) async {
+    if (from < 2) {
+      await d.execute('''CREATE TABLE IF NOT EXISTS sync_failures (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        table_name TEXT NOT NULL,
+        row_uuid   TEXT NOT NULL,
+        payload    TEXT NOT NULL DEFAULT '',
+        error      TEXT NOT NULL DEFAULT '',
+        attempts   INTEGER NOT NULL DEFAULT 1,
+        failed_at  TEXT NOT NULL
+      )''');
+      await _rescueUnreadableOutbox(d);
+    }
+  }
+
+  /// Rebuild outbox payloads that the old string encoder wrote as invalid JSON.
+  ///
+  /// Rows queued before this upgrade are corrupt on disk and can never be
+  /// parsed, so they would sit in the outbox forever, failing every sync. The
+  /// data itself is intact in the local tables, so each one is re-encoded from
+  /// its own row and the user's collections upload normally instead of having
+  /// to be re-entered. Anything that cannot be rebuilt is moved somewhere it
+  /// can be seen and retried rather than silently discarded.
+  static Future<void> _rescueUnreadableOutbox(Database d) async {
+    final List<Map<String, Object?>> rows;
+    try {
+      rows = await d.query('outbox');
+    } catch (_) {
+      return; // No outbox yet - a fresh install has nothing to rescue.
+    }
+
+    for (final row in rows) {
+      final id = row['id'];
+      final table = row['table_name'];
+      final uuid = row['row_uuid'];
+      final payload = row['payload'];
+      if (id is! int || table is! String || uuid is! String) continue;
+      if (payload is! String) continue;
+
+      var readable = false;
+      try {
+        jsonDecode(payload);
+        readable = true;
+      } catch (_) {
+        readable = false;
+      }
+      if (readable) continue;
+
+      Map<String, dynamic>? rebuilt;
+      try {
+        final local = await d.query(table, where: 'uuid = ?', whereArgs: [uuid], limit: 1);
+        if (local.isNotEmpty) rebuilt = OutboxPayload.rebuild(table, local.first);
+      } catch (_) {
+        rebuilt = null;
+      }
+
+      if (rebuilt != null) {
+        await d.update(
+          'outbox',
+          {'payload': OutboxPayload.encode(rebuilt)},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      } else {
+        await d.delete('outbox', where: 'id = ?', whereArgs: [id]);
+        await d.insert('sync_failures', {
+          'table_name': table,
+          'row_uuid': uuid,
+          'payload': payload,
+          'error': 'This row was saved by an old version of the app in a form '
+              'the shop could not read. Open the record and save it again.',
+          'attempts': 0,
+          'failed_at': DateTime.now().toIso8601String(),
+        });
+      }
+    }
+  }
+
 
   static Future<void> _createSchema(Database d) async {
     final b = d.batch();
@@ -86,6 +177,20 @@ class Db {
     b.execute(
         'CREATE TABLE sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
 
+    // Rows the shop refused. They are kept rather than discarded: a rejected
+    // collection is still the user's money, and the old behaviour of deleting
+    // it from the queue meant it vanished with nothing but a count to show for
+    // it. Mirrors the desktop's sync_outbox, which already kept the error.
+    b.execute('''CREATE TABLE sync_failures (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      table_name TEXT NOT NULL,
+      row_uuid   TEXT NOT NULL,
+      payload    TEXT NOT NULL DEFAULT '',
+      error      TEXT NOT NULL DEFAULT '',
+      attempts   INTEGER NOT NULL DEFAULT 1,
+      failed_at  TEXT NOT NULL
+    )''');
+
     await b.commit(noResult: true);
   }
   // -- cash movements ------------------------------------------------------
@@ -108,15 +213,7 @@ class Db {
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
-      await _enqueue(txn, 'cash_movements', m.uuid, {
-        'uuid': m.uuid,
-        'kind': m.kind.name,
-        'amount': m.amount,
-        'customer_name': m.customerName,
-        'note': m.note,
-        'occurred_at': m.occurredAt.toUtc().toIso8601String(),
-        'origin': 'mobile',
-      });
+      await _enqueue(txn, 'cash_movements', m.uuid, OutboxPayload.movement(m));
     });
   }
 
@@ -166,15 +263,7 @@ class Db {
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
-      await _enqueue(txn, 'reservations', r.uuid, {
-        'uuid': r.uuid,
-        'customer_name': r.customerName,
-        'items_json': r.itemsJson,
-        'amount': r.amount,
-        'status': r.status.name,
-        'note': r.note,
-        'origin': 'mobile',
-      });
+      await _enqueue(txn, 'reservations', r.uuid, OutboxPayload.reservation(r));
     });
   }
 
@@ -249,11 +338,14 @@ class Db {
 
   Future<void> _enqueue(Transaction txn, String table, String uuid,
       Map<String, dynamic> payload) async {
+    // Encoded with jsonEncode, never by hand - see outbox_payload.dart for the
+    // hand-rolled encoder this replaced and the six weeks of failed uploads it
+    // caused.
     await txn.insert('outbox', {
       'table_name': table,
       'row_uuid': uuid,
       'op': 'upsert',
-      'payload': _encode(payload),
+      'payload': OutboxPayload.encode(payload),
       'queued_at': DateTime.now().toIso8601String(),
     });
   }
@@ -274,11 +366,66 @@ class Db {
     await _db.update(table, {'synced': 1}, where: 'uuid = ?', whereArgs: [uuid]);
   }
 
-  /// Rows the server refused leave the retry queue so they cannot block the
-  /// rows behind them; the count is surfaced to the user instead.
-  Future<void> markRejected(String table, String uuid) async {
+  /// A row the server refused leaves the retry queue, but is RECORDED rather
+  /// than deleted.
+  ///
+  /// It used to be dropped on the floor: the outbox row was deleted and nothing
+  /// was written anywhere, so a rejected collection simply disappeared and the
+  /// user saw a bare count. The money is theirs; it has to stay visible and be
+  /// recoverable. [failedRows] feeds the More screen, [retryFailure] puts one
+  /// back in the queue.
+  Future<void> markRejected(String table, String uuid, String error) async {
+    final rows = await _db.query('outbox',
+        where: 'table_name = ? AND row_uuid = ?',
+        whereArgs: [table, uuid],
+        limit: 1);
+    final payload =
+        rows.isEmpty ? '' : (rows.first['payload'] as String? ?? '');
     await _db.delete('outbox',
         where: 'table_name = ? AND row_uuid = ?', whereArgs: [table, uuid]);
+    await _db.insert('sync_failures', {
+      'table_name': table,
+      'row_uuid': uuid,
+      'payload': payload,
+      'error': error,
+      'attempts': 1,
+      'failed_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  /// Rows the shop refused, newest first.
+  Future<List<SyncFailure>> failedRows({int limit = 100}) async {
+    final rows = await _db.query('sync_failures',
+        orderBy: 'failed_at DESC', limit: limit);
+    return rows.map(SyncFailure.fromMap).toList();
+  }
+
+  Future<int> failedCount() async =>
+      Sqflite.firstIntValue(
+          await _db.rawQuery('SELECT COUNT(*) FROM sync_failures')) ??
+      0;
+
+  /// Put a refused row back in the upload queue and clear the failure.
+  Future<void> retryFailure(int id) async {
+    final rows =
+        await _db.query('sync_failures', where: 'id = ?', whereArgs: [id], limit: 1);
+    if (rows.isEmpty) return;
+    final row = rows.first;
+    final payload = row['payload'] as String? ?? '';
+    if (payload.isNotEmpty) {
+      await _db.insert('outbox', {
+        'table_name': row['table_name'],
+        'row_uuid': row['row_uuid'],
+        'op': 'upsert',
+        'payload': payload,
+        'queued_at': DateTime.now().toIso8601String(),
+      });
+    }
+    await _db.delete('sync_failures', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> dismissFailure(int id) async {
+    await _db.delete('sync_failures', where: 'id = ?', whereArgs: [id]);
   }
 
   Future<int> pullCursor() async {
@@ -292,24 +439,6 @@ class Db {
     await _db.insert('sync_state', {'key': 'pull_cursor', 'value': '$value'},
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
-
-  /// Minimal JSON encoder. Outbox payloads are flat maps of string/number/bool
-  /// values, so this avoids pulling a JSON package into the app.
-  static String _encode(Map<String, dynamic> m) {
-    final parts = <String>[];
-    m.forEach((k, v) {
-      final value =
-          v == null ? 'null' : (v is num || v is bool) ? '$v' : _escape('$v');
-      parts.add('"${_escape(k)}":$value');
-    });
-    return '{${parts.join(',')}}';
-  }
-
-  static String _escape(String s) => s
-      .replaceAll(r'\', r'\\')
-      .replaceAll('"', r'\"')
-      .replaceAll('\n', r'\n')
-      .replaceAll('\r', r'\r');
 }
 
 class OutboxRow {
@@ -327,5 +456,42 @@ class OutboxRow {
         m['row_uuid'] as String,
         m['op'] as String? ?? 'upsert',
         m['payload'] as String,
+      );
+}
+
+/// A row the shop refused, kept so it can be seen and retried.
+class SyncFailure {
+  SyncFailure({
+    required this.id,
+    required this.table,
+    required this.uuid,
+    required this.error,
+    required this.attempts,
+    required this.failedAt,
+  });
+
+  final int id;
+  final String table;
+  final String uuid;
+  final String error;
+  final int attempts;
+  final DateTime failedAt;
+
+  /// What the user actually recognises - a collection, a reservation - rather
+  /// than the table name.
+  String get label => switch (table) {
+        'cash_movements' => 'Collection / handover',
+        'reservations' => 'Reservation',
+        _ => table,
+      };
+
+  factory SyncFailure.fromMap(Map<String, Object?> m) => SyncFailure(
+        id: m['id'] as int,
+        table: (m['table_name'] as String?) ?? '',
+        uuid: (m['row_uuid'] as String?) ?? '',
+        error: (m['error'] as String?) ?? '',
+        attempts: (m['attempts'] as int?) ?? 0,
+        failedAt: DateTime.tryParse(m['failed_at'] as String? ?? '') ??
+            DateTime.now(),
       );
 }

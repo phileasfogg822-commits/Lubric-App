@@ -92,13 +92,14 @@ class Sync {
           await db.markSynced(row.table, row.uuid);
         }
       }
-      // Rejected rows are dropped from the retry queue so they cannot block the
-      // ones behind them. A uuid the server mentions but we did not send is
-      // ignored rather than crashing the whole sync on a lookup miss.
+      // Rejected rows are recorded, not discarded, so a refused collection
+      // stays visible and can be retried. A uuid the server mentions but we did
+      // not send is ignored rather than crashing the whole sync on a lookup
+      // miss.
       for (final entry in result.rejected.entries) {
         final match = queued.where((r) => r.uuid == entry.key);
         if (match.isEmpty) continue;
-        await db.markRejected(match.first.table, match.first.uuid);
+        await db.markRejected(match.first.table, match.first.uuid, entry.value);
       }
     }
 

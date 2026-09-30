@@ -124,44 +124,94 @@ class UpdateService {
   /// `onProgress` receives 0.0-1.0 so the UI can show a real progress bar -
   /// a 20 MB download over a shop's 4G connection is not something to leave
   /// as an indeterminate spinner.
+  ///
+  /// Writes to the app's EXTERNAL files directory rather than the internal
+  /// cache. The old location was invisible to the user (and purgeable by
+  /// Android at any time), which is why a completed download could not be found
+  /// anywhere - "it downloaded and I never knew where". `open_filex`'s
+  /// FileProvider already covers this path, so the installer can still read it.
   Future<File> download(
     AppRelease release, {
     void Function(double)? onProgress,
   }) async {
-    final dir = await getTemporaryDirectory();
-    final target = File('${dir.path}/lubric-field-${release.versionName}.apk');
+    final dir = await _downloadDir();
+    final target = File('${dir.path}/${release.versionName}.apk');
+    final partial = File('${target.path}.part');
+
+    // Download to .part first, so an interrupted transfer can never be mistaken
+    // for a finished APK by the installer.
+    if (await partial.exists()) await partial.delete();
 
     await _dio.download(
       release.apkUrl,
-      target.path,
+      partial.path,
       onReceiveProgress: (received, total) {
         if (total > 0) onProgress?.call(received / total);
       },
     );
 
     if (release.sha256.isNotEmpty) {
-      final digest = await sha256.bind(target.openRead()).first;
+      final digest = await sha256.bind(partial.openRead()).first;
       if (digest.toString() != release.sha256) {
-        await target.delete().catchError((_) => target);
+        await partial.delete().catchError((_) => partial);
         throw StateError(
           'The downloaded file did not match the published checksum. '
           'Nothing was installed - please try again.',
         );
       }
     }
-    return target;
+
+    if (await target.exists()) await target.delete();
+    return partial.rename(target.path);
+  }
+
+  /// Where updates are kept, preferring external storage so the file is
+  /// reachable by a file manager and survives a cache clear.
+  Future<Directory> _downloadDir() async {
+    try {
+      final ext = await getExternalStorageDirectory();
+      if (ext != null) {
+        final dir = Directory('${ext.path}/updates');
+        if (!await dir.exists()) await dir.create(recursive: true);
+        return dir;
+      }
+    } catch (_) {
+      // Falls through to the cache on devices without external storage.
+    }
+    final tmp = await getTemporaryDirectory();
+    final dir = Directory('${tmp.path}/updates');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return dir;
   }
 
   /// Open the system installer for a downloaded APK. Android will show its
   /// normal "install this app?" prompt, including the one-time permission for
   /// this app to install packages.
+  ///
+  /// The error messages here are deliberately specific. This step used to fail
+  /// with "it just did not install", because the manifest had no
+  /// REQUEST_INSTALL_PACKAGES and Android refused the intent without saying so.
   Future<void> install(File apk) async {
-    final result = await OpenFilex.open(apk.path);
-    if (result.type != ResultType.done) {
+    if (!await apk.exists()) {
       throw StateError(
-        'Could not open the installer (${result.type}). '
-        'You can install it manually from your Downloads folder.',
+        'The downloaded file is missing from ${apk.path}. Please download again.',
       );
     }
+
+    final result = await OpenFilex.open(apk.path);
+    if (result.type == ResultType.done) return;
+
+    throw StateError(
+      switch (result.type) {
+        ResultType.permissionDenied =>
+          'Android did not allow the install. Open Settings → Apps → '
+              'Lubric Field → Install unknown apps, allow it, then try again.',
+        ResultType.fileNotFound =>
+          'The update file was not found at ${apk.path}. Please download again.',
+        _ =>
+          'The installer did not open (${result.type}). You can also install it '
+              'by hand from: ${apk.path}',
+      },
+    );
   }
 }

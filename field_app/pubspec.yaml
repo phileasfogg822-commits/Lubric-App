@@ -15,7 +15,14 @@ publish_to: "none"
 #   0.6.0+6  sync failures now say which step broke and why, instead of
 #            "cannot sync"; More shows the last problem and can test the
 #            connection; the pull cursor only advances past stored rows.
-version: 0.6.0+6
+#   0.6.1+7  THE SYNC FIX. The outbox encoder emitted invalid JSON (string
+#            values were never quoted), so every queued row failed to upload
+#            and no phone data had ever reached the shop. Payloads are now
+#            built by a tested pure function and encoded with jsonEncode; rows
+#            already stuck are rebuilt from the local table on upgrade.
+#            Updates also carry REQUEST_INSTALL_PACKAGES, without which
+#            Android silently refused to install the downloaded APK.
+version: 0.6.1+7
 
 environment:
   sdk: ">=3.3.0 <4.0.0"

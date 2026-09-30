@@ -43,11 +43,14 @@ class UpdateDialog extends StatefulWidget {
 class _UpdateDialogState extends State<UpdateDialog> {
   double? _progress;
   String? _error;
+  String? _downloadedPath;
+  bool _installerOpened = false;
 
   Future<void> _install() async {
     setState(() {
       _progress = 0;
       _error = null;
+      _installerOpened = false;
     });
     try {
       final release = widget.check.available!;
@@ -57,8 +60,17 @@ class _UpdateDialogState extends State<UpdateDialog> {
           if (mounted) setState(() => _progress = p);
         },
       );
+      // Record where the file actually is. A completed download used to vanish
+      // into the internal cache with no trace, so there was no way to find it
+      // or to install it by hand if the installer refused.
+      if (mounted) setState(() => _downloadedPath = apk.path);
       await UpdateService.i.install(apk);
-      if (mounted) setState(() => _progress = null);
+      if (mounted) {
+        setState(() {
+          _progress = null;
+          _installerOpened = true;
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -131,6 +143,41 @@ class _UpdateDialogState extends State<UpdateDialog> {
                   style: const TextStyle(color: moneyRed, fontSize: 13)),
             ),
           ],
+          if (_installerOpened) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE7F6EC),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('Android is installing the update.',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF14532D),
+                          fontSize: 13)),
+                  SizedBox(height: 6),
+                  Text(
+                    'Confirm the prompts, then reopen Lubric Field from the '
+                    'launcher. The app closes during the install - that is '
+                    'normal and your data is safe.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF14532D)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (_downloadedPath != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Saved to: ${_downloadedPath!}\n'
+              'If the prompt does not open, install it from there.',
+              style: const TextStyle(fontSize: 11.5, color: Color(0xFF7A838F)),
+            ),
+          ],
         ],
       ),
       actions: [
@@ -140,8 +187,10 @@ class _UpdateDialogState extends State<UpdateDialog> {
             child: const Text('Later'),
           ),
         FilledButton(
-          onPressed: busy ? null : _install,
-          child: Text(busy ? 'Downloading…' : 'Download & install'),
+          onPressed: busy || _installerOpened ? null : _install,
+          child: Text(busy
+              ? 'Downloading…'
+              : (_error == null ? 'Download & install' : 'Try again')),
         ),
       ],
     );

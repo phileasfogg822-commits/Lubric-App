@@ -22,6 +22,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _pending = 0;
   String _version = '';
   bool _testing = false;
+  List<SyncFailure> _failures = const [];
 
   @override
   void initState() {
@@ -34,7 +35,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _refresh() async {
     final n = await Db.i.pendingCount();
-    if (mounted) setState(() => _pending = n);
+    // Rows the shop refused. Shown rather than dropped: a rejected collection
+    // is still money the field user is holding, and deleting it from the queue
+    // with nothing left behind meant it could quietly disappear.
+    final f = await Db.i.failedRows();
+    if (mounted) {
+      setState(() {
+        _pending = n;
+        _failures = f;
+      });
+    }
+  }
+
+  Future<void> _retryFailure(int id) async {
+    await Db.i.retryFailure(id);
+    await _refresh();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Queued to upload again. Tap Sync now.')),
+    );
   }
 
   /// Ask the shop, in one line, whether it still knows this phone. Separates
@@ -172,6 +191,81 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 6),
                     Text(lastError,
                         style: const TextStyle(fontSize: 12.5, height: 1.45)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          if (_failures.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Card(
+              color: const Color(0xFFFFF4E5),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      const Icon(Icons.priority_high,
+                          size: 18, color: Color(0xFFB45309)),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${_failures.length} record(s) the shop refused',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFFB45309)),
+                      ),
+                    ]),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'These are saved here and have NOT been sent. Retry them '
+                      'or ask the shop to check them - they will not be lost.',
+                      style: TextStyle(fontSize: 12, height: 1.4),
+                    ),
+                    const SizedBox(height: 8),
+                    for (final f in _failures)
+                      Container(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            top: BorderSide(color: const Color(0xFFEADFCB)),
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(f.label,
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600)),
+                                  Text(f.error,
+                                      style: const TextStyle(
+                                          fontSize: 11.5,
+                                          color: Color(0xFF7A838F),
+                                          height: 1.35)),
+                                ],
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () => _retryFailure(f.id),
+                              child: const Text('Retry',
+                                  style: TextStyle(fontSize: 12)),
+                            ),
+                            TextButton(
+                              onPressed: () async {
+                                await Db.i.dismissFailure(f.id);
+                                await _refresh();
+                              },
+                              child: const Text('Discard',
+                                  style: TextStyle(fontSize: 12)),
+                            ),
+                          ],
+                        ),
+                      ),
                   ],
                 ),
               ),
