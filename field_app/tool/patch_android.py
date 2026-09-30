@@ -79,7 +79,10 @@ RELEASE_SIGNING_CONFIG = """        // Injected by tool/patch_android.py - signs
         create("release") {
             keyAlias = keystoreProperties['keyAlias']
             keyPassword = keystoreProperties['keyPassword']
-            storeFile = keystoreProperties['storeFile']
+            // file() is required: Gradle wants a java.io.File, and a bare String
+            // fails the build with "Cannot cast object ... to class
+            // java.io.File". An absolute path in key.properties resolves as-is.
+            storeFile = file(keystoreProperties['storeFile'])
             storePassword = keystoreProperties['storePassword']
         }
 """
