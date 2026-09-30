@@ -57,6 +57,24 @@ class UpdateCheck {
   bool get isMandatory => available?.mandatory ?? false;
 }
 
+/// The installed build's versionCode.
+///
+/// This must be `buildNumber` - the integer after the `+` in pubspec.yaml
+/// (`0.4.0+4` -> 4) - and NOT the version NAME. Parsing the name looked
+/// equivalent but is not: stripping the dots off "0.4.0" yields 40, so the
+/// phone reported itself as build 40 and compared it against the published
+/// 1, 2, 3, 4, ... Updates could therefore never be offered. The whole update
+/// feature was dead from the day it shipped, which is why every new build had
+/// to be downloaded and installed by hand.
+int installedVersionCode(PackageInfo info) {
+  return int.tryParse(info.buildNumber.trim()) ?? 0;
+}
+
+/// Is the published build newer than the one on the phone?
+bool isUpdateAvailable(int installedCode, int publishedCode) {
+  return publishedCode > installedCode;
+}
+
 class UpdateService {
   UpdateService._();
   static final UpdateService i = UpdateService._();
@@ -91,9 +109,8 @@ class UpdateService {
     if (manifest == null) return null;
 
     final release = AppRelease.fromJson(manifest);
-    final currentCode =
-        int.tryParse(info.version.replaceAll(RegExp(r'\D'), '')) ?? 0;
-    final outdated = release.versionCode > currentCode;
+    final currentCode = installedVersionCode(info);
+    final outdated = isUpdateAvailable(currentCode, release.versionCode);
     return UpdateCheck(
       currentCode: currentCode,
       currentName: info.version,

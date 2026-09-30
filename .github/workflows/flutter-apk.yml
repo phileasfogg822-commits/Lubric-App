@@ -53,6 +53,34 @@ jobs:
         working-directory: field_app
         run: flutter test --reporter expanded
 
+      # Sign the release build with the SHOP'S key, not a throwaway one.
+      #
+      # Every build used to be signed with the debug key the runner generates
+      # fresh on each job, so every APK had a different certificate. Android
+      # refuses to install an update whose signature differs from the installed
+      # one ("App not installed"), so each release had to be uninstalled by hand
+      # first - and uninstalling wipes the local database and the pairing, so the
+      # phone had to be set up again from scratch. That is the other half of
+      # "the app never updates itself".
+      - name: Restore the release signing key
+        working-directory: field_app
+        env:
+          KEYSTORE_B64: ${{ secrets.LUBRIC_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.LUBRIC_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.LUBRIC_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::LUBRIC_KEYSTORE_BASE64 is not set - the build would be"
+            echo "::error::signed with an ephemeral debug key and could never be"
+            echo "::error::installed as an in-place update."
+            exit 1
+          fi
+          mkdir -p android
+          echo "$KEYSTORE_B64" | base64 --decode > android/upload-keystore.jks
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=upload-keystore.jks\n' \
+            "$KEYSTORE_PASSWORD" "$KEYSTORE_PASSWORD" "$KEY_ALIAS" > android/key.properties
+
       - name: Build release APK
         working-directory: field_app
         run: |
@@ -63,6 +91,37 @@ jobs:
           #   * cleartext HTTP is blocked by default from Android 9 onwards.
           python3 tool/patch_android.py
           flutter build apk --release
+
+      # Android only accepts an in-place update when the signing certificate is
+      # identical to the installed one. Failing here is far better than shipping
+      # an APK that forces every field phone to be wiped and re-paired.
+      - name: Verify the APK is signed with the shop's release key
+        working-directory: field_app
+        env:
+          EXPECTED_FINGERPRINT: ${{ vars.LUBRIC_KEY_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          CERT=$(unzip -Z1 "$APK" | grep -iE '^META-INF/.*\.(RSA|DSA|EC)$' | head -1 || true)
+          if [ -z "$CERT" ]; then
+            echo "::error::release APK has no v1 signature block - it was never signed"
+            exit 1
+          fi
+          GOT=$(unzip -p "$APK" "$CERT" | openssl pkcs7 -inform DER -print_certs 2>/dev/null \
+                | openssl x509 -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)
+          echo "    signing certificate: $GOT"
+          if [ -n "$EXPECTED_FINGERPRINT" ]; then
+            if [ "$GOT" != "$EXPECTED_FINGERPRINT" ]; then
+              echo "::error::this APK is signed with the WRONG key, so no phone can"
+              echo "::error::install it over the current one without being wiped first."
+              echo "::error::expected: $EXPECTED_FINGERPRINT"
+              exit 1
+            fi
+            echo "    matches the shop's release key"
+          else
+            echo "::warning::repo variable LUBRIC_KEY_FINGERPRINT is unset, so the"
+            echo "::warning::certificate was NOT verified against a known value."
+          fi
 
       # Read the manifest back OUT of the signed APK and assert that everything
       # the app needs to make a network request is really in the compiled
