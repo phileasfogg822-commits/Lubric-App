@@ -1,8 +1,8 @@
 {
-  "versionCode": 4,
-  "versionName": "0.4.0",
-  "apk": "LubricField-0.4.0.apk",
-  "sha256": "df3d346b7bfd8f09253f0c7c7117c556c3875f8e536a6aac5e899d049f49b0a7",
+  "versionCode": 5,
+  "versionName": "0.5.0",
+  "apk": "LubricField-0.5.0.apk",
+  "sha256": "c7b778ec9f62cc55167d2982866bc6ff5b9cd76b4ec920a329b3fac3d93a4219",
   "mandatory": true,
-  "notes": "THE FIX. Flutter only puts the INTERNET permission in debug/profile builds, so every release APK so far shipped with no network permission at all - the app could not make a single request, which is why it always said 'cannot reach the server' even though a browser on the same phone loaded it fine. This build adds that permission plus the cleartext-HTTP config. Install this one."
+  "notes": "INSTALL THIS ONE BY HAND - it is the last manual install. Two separate bugs stopped the app from ever updating itself, and both are fixed here. (1) The app worked out its own version by removing the dots from the version NAME, so 0.4.0 became 40; it then compared that against the published 1, 2, 3, 4 and concluded it was always up to date. It now reads the real version number. (2) Every previous build was signed with a different throwaway key, so Android refused to install an update over the old one. All builds from now on use one permanent key, and the release build fails if it is not the right one. Android will ask you once to allow this app to install other apps - that is expected."
 }
