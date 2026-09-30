@@ -4,16 +4,51 @@ import { dbSelect, dbExecute } from "../../lib/db";
 import { getCloudBase, setCloudBase } from "../../lib/cloud";
 import { pairDevice, getSyncStatus, onSyncStatus, syncNow } from "../../lib/sync";
 import { getLocalDb } from "../../lib/db";
+import { d } from "../../lib/format";
+import { useAuth } from "../../lib/auth";
+import { PERMISSIONS, isAdminRole } from "../../lib/permissions";
+import {
+  canManageDevices,
+  createPairingCode,
+  listDevices,
+  revokeDevice,
+  type Device,
+  type PendingCode,
+} from "../../lib/pairing";
 import { Page } from "../../components/Page";
 import { FormField } from "../../components/FormField";
 
 export default function Shop() {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [cloudUrl, setCloudUrl] = useState(() => getCloudBase() ?? "");
   const [pairingCode, setPairingCode] = useState("");
   const [syncStatus, setSyncStatus] = useState(getSyncStatus());
   useEffect(() => onSyncStatus((s, err) => setSyncStatus({ status: s, lastError: err, lastSyncAt: syncStatus.lastSyncAt })), []);
   const [s, setS] = useState({ name: "LubricApp", address: "", phone: "", currency: "PKR", used_oil_drum_capacity: 200, manual_price_allowed: true, wholesale_mode: "auto" });
+
+  // Issuing a pairing code hands out a permanent sync token, so it is gated on
+  // the same permission the server enforces on the devices table.
+  const canPair = isAdminRole(user?.role) || (user?.permissions as string[] | undefined)?.includes(PERMISSIONS.TEAM_MANAGE);
+  const [newDeviceName, setNewDeviceName] = useState("");
+  const [issued, setIssued] = useState<PendingCode | null>(null);
+  const [pairError, setPairError] = useState("");
+
+  const devicesQ = useQuery({
+    queryKey: ["devices"],
+    queryFn: listDevices,
+    enabled: canPair && canManageDevices(),
+  });
+  const addDevice = useMutation({
+    mutationFn: () => createPairingCode(newDeviceName, "mobile"),
+    onSuccess: (code) => { setIssued(code); setNewDeviceName(""); setPairError(""); qc.invalidateQueries({ queryKey: ["devices"] }); },
+    onError: (e: any) => setPairError(e?.message || String(e)),
+  });
+  const revoke = useMutation({
+    mutationFn: (id: number) => revokeDevice(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["devices"] }),
+    onError: (e: any) => setPairError(e?.message || String(e)),
+  });
   const { data: settings } = useQuery({ queryKey: ["shop_settings"], queryFn: () => dbSelect<any>("SELECT * FROM settings").then(r => { const obj: any = {}; r.forEach((row: any) => { obj[row.key] = row.value; }); return obj; }) });
   // Bills (POSPrint/Reports) read name/address/phone/currency straight from the
   // shops table, so prefill the form from it and mirror edits back on save.
@@ -77,6 +112,139 @@ export default function Shop() {
           </div>
         </div>
       </div>
+
+      {canPair && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Phones &amp; Devices</div>
+          <div style={{ fontSize: "0.8rem", color: "#64748b", marginBottom: 12 }}>
+            Add as many phones as you like. Press <b>Add a phone</b>, then type the code it shows
+            into that phone on its first screen. The code works once and only once.
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input
+              className="input"
+              style={{ width: 200 }}
+              placeholder="Phone name (optional)"
+              value={newDeviceName}
+              onChange={(e) => setNewDeviceName(e.target.value)}
+            />
+            <button
+              className="btn btn-primary"
+              onClick={() => addDevice.mutate()}
+              disabled={addDevice.isPending}
+            >
+              {addDevice.isPending ? "Creating…" : "+ Add a phone"}
+            </button>
+            {pairError && <span style={{ color: "#b91c1c", fontSize: "0.8rem" }}>{pairError}</span>}
+          </div>
+
+          {issued && (
+            <div
+              style={{
+                marginTop: 14,
+                padding: 16,
+                borderRadius: 8,
+                background: "#eff6ff",
+                border: "1px solid #bfdbfe",
+              }}
+            >
+              <div style={{ fontSize: "0.8rem", color: "#1e40af" }}>
+                Pairing code for <b>{issued.name}</b> — type this into the phone:
+              </div>
+              <div
+                style={{
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                  fontSize: "2rem",
+                  fontWeight: 800,
+                  letterSpacing: "0.25em",
+                  color: "#1e3a8a",
+                  margin: "6px 0",
+                }}
+              >
+                {issued.code}
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(issued.code);
+                    setPairError("");
+                  }}
+                >
+                  Copy code
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setIssued(null)}>
+                  Done
+                </button>
+                <span style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                  Shown once. If you lose it, revoke the phone below and add it again.
+                </span>
+              </div>
+            </div>
+          )}
+
+          {!canManageDevices() ? (
+            <div className="alert alert-success" style={{ marginTop: 12 }}>
+              This desktop is running offline, so it cannot reach the shop server. Connect to the
+              cloud (above) to see the phones attached to this shop.
+            </div>
+          ) : devicesQ.isLoading ? (
+            <div style={{ padding: 12, color: "#64748b" }}>Loading devices…</div>
+          ) : devicesQ.data?.length ? (
+            <table className="table" style={{ marginTop: 14 }}>
+              <thead>
+                <tr>
+                  <th>Device</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Last sync</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {devicesQ.data.map((dv: Device) => (
+                  <tr key={dv.id}>
+                    <td style={{ fontWeight: 500 }}>{dv.name || `Device #${dv.id}`}</td>
+                    <td>{dv.kind === "mobile" ? "Phone" : "Desktop"}</td>
+                    <td>
+                      <span
+                        className={`badge ${
+                          dv.status === "paired" ? "badge-green" : dv.status === "waiting" ? "badge-yellow" : "badge-gray"
+                        }`}
+                      >
+                        {dv.status === "paired" ? "Paired" : dv.status === "waiting" ? "Waiting for setup" : "Revoked"}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: "0.8rem", color: "#64748b" }}>
+                      {dv.last_sync_at ? d(dv.last_sync_at) : "never"}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      {dv.status !== "revoked" && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => {
+                            if (confirm(`Remove "${dv.name || "this device"}"?\n\nIt stops syncing immediately. Use this if the phone is lost or sold.`)) {
+                              revoke.mutate(dv.id);
+                            }
+                          }}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div style={{ padding: 12, fontSize: "0.8rem", color: "#64748b" }}>
+              No phones attached yet.
+            </div>
+          )}
+        </div>
+      )}
+
       <button className="btn btn-primary" onClick={() => save.mutate()}>Save Settings</button>
     </Page>
   );

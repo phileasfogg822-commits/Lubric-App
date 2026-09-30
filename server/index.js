@@ -107,6 +107,14 @@ const READ_PERMISSIONS = {
   purchase_order_items: [P.PURCHASE_MANAGE, P.REPORTS],
   vendor_payables: [P.PURCHASE_MANAGE, P.REPORTS],
   inspections: [P.INSPECTIONS, P.POS_CREATE],
+  // Devices carry a long-lived token that can read and write the whole shop's
+  // data over /v1. Handing one out is as sensitive as creating a user account,
+  // so it sits behind the same key - and, crucially, it has to be LISTED here.
+  // An unlisted table is allowed by default: requiredPermissions returns null for
+  // an unknown table and the middleware treats null as "nothing to check".
+  // Before this entry existed, any logged-in cashier could read the devices
+  // table and mint a pairing code, then exchange it for a permanent sync token.
+  devices: [P.TEAM_MANAGE],
   users: [P.TEAM_MANAGE],
   role_permissions: [P.TEAM_MANAGE],
   shops: [P.DASHBOARD, P.SHOP_MANAGE],
@@ -143,6 +151,9 @@ const WRITE_PERMISSIONS = {
   inspections: [P.INSPECTIONS, P.POS_CREATE],
   users: [P.TEAM_MANAGE],
   role_permissions: [P.TEAM_MANAGE],
+  // See the note in READ_PERMISSIONS: a pairing code is a permanent sync token
+  // in waiting, so minting one needs team-management rights.
+  devices: [P.TEAM_MANAGE],
   shops: [P.SHOP_MANAGE],
   settings: [P.SHOP_MANAGE],
   reminders: [P.DASHBOARD],
