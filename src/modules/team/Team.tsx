@@ -6,6 +6,8 @@ import { Modal } from "../../components/Modal";
 import { FormField } from "../../components/FormField";
 import { EmptyState } from "../../components/EmptyState";
 import { useAuth } from "../../lib/auth";
+import { d } from "../../lib/format";
+import { canManageDevices, countPhones, listDevices, type Device } from "../../lib/pairing";
 import {
   ACTION_PERMISSIONS,
   MODULE_PERMISSIONS,
@@ -43,6 +45,62 @@ function blankForm() {
   };
 }
 
+/**
+ * The phones attached to this shop, counted plainly.
+ *
+ * These are not user accounts - a field app has no login, it holds a device
+ * token obtained by pairing - but for the owner's question ("how many phones
+ * are connected, and which ones are actually sending data?") they belong
+ * alongside the members. A phone that has never synced is called out, because
+ * that is the one that looks fine and is silently holding someone's cash.
+ */
+function ConnectedPhones({ devices }: { devices: Device[] }) {
+  const { paired, waiting } = countPhones(devices);
+  const phones = devices.filter((x) => x.kind === "mobile" && x.status !== "revoked");
+
+  return (
+    <div className="card" style={{ marginBottom: 14, background: "#f8fafc" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: "1.5rem", fontWeight: 800 }}>{paired}</span>
+        <span style={{ fontWeight: 600 }}>
+          paired phone{paired === 1 ? "" : "s"} connected
+        </span>
+        {waiting > 0 && (
+          <span className="badge badge-yellow">{waiting} waiting to pair</span>
+        )}
+        <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "#94a3b8" }}>
+          phones are managed in Shop Settings
+        </span>
+      </div>
+      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+        {phones.map((p) => (
+          <div
+            key={p.id}
+            style={{ display: "flex", alignItems: "center", gap: 10, fontSize: "0.82rem", flexWrap: "wrap" }}
+          >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                background: p.status === "paired" ? "#16a34a" : "#eab308",
+                display: "inline-block",
+              }}
+            />
+            <span style={{ fontWeight: 500, minWidth: 130 }}>{p.name || `Phone #${p.id}`}</span>
+            <span style={{ color: p.last_sync_at ? "#64748b" : "#b45309" }}>
+              {p.last_sync_at ? `last sync ${d(p.last_sync_at)}` : "has never synced"}
+            </span>
+            {p.sync_requested_at && (
+              <span className="badge badge-blue">asked to sync</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Team() {
   const qc = useQueryClient();
   const { hasPermission, user } = useAuth();
@@ -56,6 +114,16 @@ export default function Team() {
     queryKey: ["users"],
     queryFn: () =>
       dbSelect<Member>("SELECT id, full_name, email, role, permissions FROM users ORDER BY role, full_name"),
+  });
+
+  // Paired phones are people, from the shop's point of view: each one is a
+  // signed-in collector holding its own cash. Shown here, next to the members,
+  // so "who can collect money for this shop" is answered in one place rather
+  // than by remembering there is a separate devices panel under Shop Settings.
+  const { data: phones } = useQuery({
+    queryKey: ["devices"],
+    enabled: canManage && canManageDevices(),
+    queryFn: listDevices,
   });
 
   function close() {
@@ -160,6 +228,10 @@ export default function Team() {
         ) : null
       }
     >
+      {canManage && phones && phones.length > 0 && (
+        <ConnectedPhones devices={phones} />
+      )}
+
       {isLoading ? (
         <div style={{ textAlign: "center", padding: 40 }}>Loading...</div>
       ) : !members?.length ? (
