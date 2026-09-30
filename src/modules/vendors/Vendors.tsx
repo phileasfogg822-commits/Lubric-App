@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { dbSelect, dbExecute } from "../../lib/db";
 import { Page } from "../../components/Page";
 import { Modal } from "../../components/Modal";
@@ -43,10 +44,18 @@ export default function Vendors() {
           {vendors.map((v: any) => (
             <div key={v.id} className="card" style={{ padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
-                <div style={{ fontWeight: 600 }}>{v.name}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontWeight: 600 }}>{v.name}</span>
+                  {Number(v.payable_balance) > 0 && (
+                    <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#b91c1c" }}>
+                      owes {Number(v.payable_balance).toLocaleString()}
+                    </span>
+                  )}
+                </div>
                 <div style={{ fontSize: "0.8rem", color: "#64748b" }}>{v.contact} {v.phone ? `· ${v.phone}` : ""}</div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Link className="btn btn-ghost btn-sm" to={`/ledger?type=vendor&id=${v.id}`}>Khata</Link>
                 <button className="btn btn-ghost btn-sm" onClick={() => scheduleMeeting(v)}>🗓 Meet</button>
                 <button className="btn btn-ghost btn-sm" onClick={() => openEdit(v)}>Edit</button>
               </div>

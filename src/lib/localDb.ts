@@ -43,6 +43,75 @@ CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_vehicles_customer ON vehicles(customer_id);
 `;
 
+// Part 3: the khata (migration 014). Append-only money history — balances,
+// statements and trends are all derived from these rows, never stored.
+// CHECK constraints mirror server/migrations/014_party_ledger.sql so an
+// offline device rejects the same writes the server would.
+export const LOCAL_SCHEMA_3 = `
+CREATE TABLE IF NOT EXISTS commitments (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid                TEXT UNIQUE NOT NULL,
+  shop_id             INTEGER DEFAULT 1,
+  party_type          TEXT NOT NULL DEFAULT 'customer' CHECK (party_type IN ('customer','vendor')),
+  party_id            INTEGER,
+  status              TEXT NOT NULL DEFAULT 'booked' CHECK (status IN ('booked','converted','cancelled')),
+  total               REAL DEFAULT 0,
+  notes               TEXT DEFAULT '',
+  taken_by_user_id    INTEGER,
+  converted_order_id  INTEGER,
+  occurred_at         TEXT DEFAULT (datetime('now')),
+  origin              TEXT DEFAULT 'shop',
+  created_at          TEXT DEFAULT (datetime('now')),
+  updated_at          TEXT
+);
+CREATE TABLE IF NOT EXISTS commitment_items (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid          TEXT UNIQUE NOT NULL,
+  commitment_id INTEGER NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'product' CHECK (kind IN ('product','service','partial_container','used_oil','other')),
+  ref_id        INTEGER,
+  product_name  TEXT DEFAULT '',
+  qty           REAL DEFAULT 1,
+  unit_price    REAL DEFAULT 0,
+  line_total    REAL DEFAULT 0,
+  created_at    TEXT DEFAULT (datetime('now')),
+  updated_at    TEXT
+);
+CREATE TABLE IF NOT EXISTS party_ledger (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid              TEXT UNIQUE NOT NULL,
+  shop_id           INTEGER DEFAULT 1,
+  party_type        TEXT NOT NULL CHECK (party_type IN ('customer','vendor')),
+  party_id          INTEGER NOT NULL,
+  kind              TEXT NOT NULL CHECK (kind IN ('opening','bill','payment','return','adjustment')),
+  direction         TEXT NOT NULL CHECK (direction IN ('debit','credit')),
+  amount            REAL NOT NULL DEFAULT 0,
+  order_id          INTEGER,
+  vendor_payable_id INTEGER,
+  cash_movement_id  INTEGER,
+  commitment_id     INTEGER,
+  note              TEXT DEFAULT '',
+  occurred_at       TEXT DEFAULT (datetime('now')),
+  origin            TEXT DEFAULT 'shop',
+  created_at        TEXT DEFAULT (datetime('now')),
+  updated_at        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_party ON party_ledger(shop_id, party_type, party_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_ledger_updated ON party_ledger(shop_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_commitments_party ON commitments(shop_id, party_type, party_id, occurred_at);
+-- How one payment was split across the invoices it settled (migration 017).
+CREATE TABLE IF NOT EXISTS payable_allocations (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id           INTEGER DEFAULT 1,
+  payment_uuid      TEXT NOT NULL,
+  vendor_payable_id INTEGER NOT NULL,
+  amount            REAL NOT NULL DEFAULT 0,
+  created_at        TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_alloc_payable ON payable_allocations(vendor_payable_id);
+CREATE INDEX IF NOT EXISTS idx_alloc_payment ON payable_allocations(payment_uuid);
+`;
+
 const LOCAL_SEED = `
 INSERT OR IGNORE INTO shops (id, name, currency) VALUES (1, 'Zafar Lubricants', 'PKR');
 INSERT OR IGNORE INTO accounts (id, name, type) VALUES (1, 'Shop Cash Drawer', 'cash');
@@ -68,13 +137,44 @@ export function pgToSqlite(sql: string): string {
     .replace(/\bFALSE\b/gi, "0");
 }
 
+/**
+ * Columns the sync layer needs that this schema predates: 012_sync added uuid,
+ * shop_id and updated_at to every replicated table, but an existing local
+ * database keeps the table it was created with — CREATE TABLE IF NOT EXISTS
+ * never alters it. SQLite has no "ADD COLUMN IF NOT EXISTS", so check first.
+ *
+ * Only the tables the khata writes are patched. Recording a vendor payment
+ * settles an invoice, and without updated_at the settled row would never
+ * replicate; the other tables are left for the day local sync is switched on.
+ */
+const SYNC_COLUMN_PATCHES: { table: string; column: string; decl: string }[] = [
+  { table: "vendor_payables", column: "uuid", decl: "TEXT" },
+  { table: "vendor_payables", column: "shop_id", decl: "INTEGER DEFAULT 1" },
+  { table: "vendor_payables", column: "updated_at", decl: "TEXT" },
+];
+
+async function patchSyncColumns(db: { select: (s: string) => Promise<unknown>; execute: (s: string) => Promise<unknown> }): Promise<void> {
+  for (const p of SYNC_COLUMN_PATCHES) {
+    const cols = (await db.select(`PRAGMA table_info(${p.table})`)) as { name: string }[] | null;
+    if (!Array.isArray(cols) || cols.length === 0) continue; // table absent
+    if (cols.some((c) => c.name === p.column)) continue; // already there
+    await db.execute(`ALTER TABLE ${p.table} ADD COLUMN ${p.column} ${p.decl}`);
+  }
+}
+
 /** Run the local schema + seed once per app session (idempotent DDL). */
-export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown> }): Promise<void> {
+export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>; select: (s: string) => Promise<unknown> }): Promise<void> {
   if (!schemaReady) {
     schemaReady = (async () => {
       await db.execute(LOCAL_SCHEMA);
       await db.execute(LOCAL_SCHEMA_2);
+      await db.execute(LOCAL_SCHEMA_3);
       await db.execute(LOCAL_SEED);
+      // Columns first, then the index that depends on them.
+      await patchSyncColumns(db);
+      await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_vendor_payables_uuid ON vendor_payables(uuid)"
+      );
     })().catch((e) => {
       schemaReady = null; // allow retry on next query
       throw e;

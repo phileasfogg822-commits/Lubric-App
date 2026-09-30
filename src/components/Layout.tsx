@@ -6,9 +6,10 @@ import { NotificationBell } from "./NotificationBell";
 /**
  * Sidebar entries. `permission` matches a key in src/lib/permissions.ts and is
  * mirrored by the SQL guard in server/index.js. Icons are written as unicode
- * escapes so this file stays plain ASCII.
+ * escapes so this file stays plain ASCII. `anyOf` opens an entry to a user who
+ * holds any one of several keys — for pages that serve more than one module.
  */
-const NAV: { to: string; label: string; icon: string; permission: string }[] = [
+const NAV: { to: string; label: string; icon: string; permission?: string; anyOf?: string[] }[] = [
   { to: "/dashboard", label: "Dashboard", icon: "\u25A6", permission: "dashboard" },
   { to: "/reminders", label: "Reminders", icon: "\u23F0", permission: "dashboard" },
   { to: "/pos", label: "New Sale", icon: "\u{1F9FE}", permission: "pos.create" },
@@ -18,6 +19,7 @@ const NAV: { to: string; label: string; icon: string; permission: string }[] = [
   { to: "/catalog", label: "Catalog", icon: "\u{1F4E6}", permission: "catalog.manage" },
   { to: "/customers", label: "Customers", icon: "\u{1F465}", permission: "customers" },
   { to: "/vendors", label: "Vendors", icon: "\u{1F3EA}", permission: "vendors" },
+  { to: "/ledger", label: "Khata", icon: "\u{1F4D8}", anyOf: ["customers", "vendors"] },
   { to: "/accounts", label: "Accounts", icon: "\u{1F4B3}", permission: "accounts" },
   { to: "/expenses", label: "Expenses", icon: "\u{1F4B8}", permission: "expenses.manage" },
   { to: "/purchase", label: "Purchases", icon: "\u{1F69B}", permission: "purchase.manage" },
@@ -35,7 +37,8 @@ export default function Layout() {
   /** Admin/owner see everything; everyone else needs the key on their list. */
   function visible(item: (typeof NAV)[number]) {
     if (admin) return true;
-    return perms.includes(item.permission);
+    const needed = item.anyOf ?? (item.permission ? [item.permission] : []);
+    return needed.some((k) => perms.includes(k));
   }
 
   function handleLogout() {

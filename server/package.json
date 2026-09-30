@@ -6,7 +6,10 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "e2e": "node e2e_reminders.js",
+    "e2e:ledger": "node --experimental-strip-types e2e_ledger.js",
+    "e2e:ledger:sqlite": "node --experimental-strip-types e2e_ledger_sqlite.js"
   },
   "dependencies": {
     "express": "^4.21.0",

@@ -65,6 +65,31 @@
   - `routes` (uuid, shop_id, name, date, assigned_user_id, status)
 - **ID mapping**: clients use UUIDs; the cloud assigns global integer ids. Desktop/mobile store both (`id`, `uuid`) so existing screens keep working locally.
 
+## 4b. Khata — the per-person ledger (migrations 014–017)
+
+`customers.credit_balance` and `vendors.payable_balance` were denormalised
+running totals with no history behind them, so the shop could not answer "what
+happened with this person between March and June", "is he buying more or less
+than last month?", or "print his statement".
+
+- `party_ledger` — append-only. Every movement affecting a party's balance is
+  one row; balances, statements and trends are **derived**, never stored. A
+  debit always increases the balance (what the customer owes us / what we owe
+  the vendor), so both party types share one formula.
+- `commitments` / `commitment_items` — what field staff book on the road, with
+  no stock movement until the shop converts them into an order.
+- `payable_allocations` (017) — how one payment was split across the invoices
+  it settled. Needed because `party_ledger.vendor_payable_id` can point at only
+  one invoice, and payments routinely clear several. It is also the audit trail
+  for FIFO settlement.
+- 015 books the difference between the stored balance and the ledger as an
+  explicit **opening balance** rather than silently overwriting a number the shop
+  already shows.
+
+Posted through `src/lib/ledgerSql.ts` (pure SQL, one place) + `src/lib/ledger.ts`
+(data access). Both dialects are supported: the shop server runs PostgreSQL, the
+offline desktop runs SQLite via `pgToSqlite()`.
+
 ## 5. Cloud API (extends `server/index.js`)
 
 New versioned routes under `/v1` (JWT or device-token auth):
@@ -109,6 +134,7 @@ New versioned routes under `/v1` (JWT or device-token auth):
 | 2 | Local SQLite schema + sync agent + `/v1` sync endpoints | 5–8 days | ✅ Done |
 | 3 | VPS deploy (compose, TLS, backups, pairing) | 1–2 days | ✅ Done — adapted: shared VPS 72.61.115.120, `/opt/apps/app9`, API on **:9000**, web dashboard on **:9001**, no domain/TLS yet (Caddy skipped; HTTP upgrade path documented) |
 | 4 | Android APK (finances-only) | 5–8 days | ✅ **DONE — APK BUILT & VERIFIED.** `mobile/` Capacitor + React app; GitHub Actions build #36576035654 green in 4m56s; artifact `lubric-field-apk` (19.6 MB) → `app-debug.apk` (17.58 MB, valid, signed with the Android debug key). Local copy: `LubricField-v0.1.0-debug.apk` in the project root. Repo: https://github.com/hrperalglobalcity-spec/lubric-field |
+| 4b | Khata — per-person ledger, statements, month-on-month | 2–3 days | ✅ **DONE.** Migrations 014–017, `/ledger` screen (statement, running balance, period filters, month comparison, CSV, print, WhatsApp, record payment / bill on account), deep-linked from Customers and Vendors. Verified by `server/e2e_ledger.js` (19 checks, live API + Postgres) and `server/e2e_ledger_sqlite.js` (10 checks, offline SQLite). |
 | 5 | Hardening, conflict edge cases, signing, licensing | 3–5 days | ⬜ Pending |
 
 Deployment artefacts (Phase 3): the current production topology targets the shared

@@ -93,6 +93,12 @@ const READ_PERMISSIONS = {
   categories: [P.POS_CREATE, P.CATALOG_MANAGE],
   customers: [P.CUSTOMERS, P.POS_CREATE, P.SALES_HISTORY],
   vehicles: [P.CUSTOMERS, P.POS_CREATE, P.SALES_HISTORY],
+  // The khata. Same money as orders/payables, just itemised per person, so
+  // anyone who may see the party may see the rows behind their balance.
+  party_ledger: [P.CUSTOMERS, P.VENDORS, P.POS_CREATE, P.SALES_HISTORY, P.ACCOUNTS, P.PURCHASE_MANAGE, P.REPORTS],
+  payable_allocations: [P.CUSTOMERS, P.VENDORS, P.POS_CREATE, P.SALES_HISTORY, P.ACCOUNTS, P.PURCHASE_MANAGE, P.REPORTS],
+  commitments: [P.CUSTOMERS, P.VENDORS, P.SALES_HISTORY],
+  commitment_items: [P.CUSTOMERS, P.VENDORS, P.SALES_HISTORY],
   vendors: [P.VENDORS, P.PURCHASE_MANAGE],
   accounts: [P.ACCOUNTS, P.POS_CREATE, P.EXPENSES_MANAGE, P.DASHBOARD],
   account_transactions: [P.ACCOUNTS, P.POS_CREATE, P.EXPENSES_MANAGE, P.DASHBOARD],
@@ -119,6 +125,14 @@ const WRITE_PERMISSIONS = {
   categories: [P.CATALOG_MANAGE],
   customers: [P.CUSTOMERS, P.POS_CREATE],
   vehicles: [P.CUSTOMERS, P.POS_CREATE],
+  // Posting a khata row also moves the denormalised balance column the rest of
+  // the app (and the phone) still reads, so the write keys mirror the parties:
+  // customers for receivables, vendors for payables, plus the money keys for
+  // whoever is allowed to move the till.
+  party_ledger: [P.CUSTOMERS, P.VENDORS, P.ACCOUNTS, P.POS_CREATE, P.PURCHASE_MANAGE],
+  payable_allocations: [P.CUSTOMERS, P.VENDORS, P.ACCOUNTS, P.PURCHASE_MANAGE],
+  commitments: [P.CUSTOMERS, P.VENDORS],
+  commitment_items: [P.CUSTOMERS, P.VENDORS],
   vendors: [P.VENDORS],
   accounts: [P.ACCOUNTS, P.POS_CREATE, P.EXPENSES_MANAGE],
   account_transactions: [P.ACCOUNTS, P.POS_CREATE, P.EXPENSES_MANAGE],
@@ -395,6 +409,15 @@ const SYNC_TABLES = {
   inspections: {},
   cash_movements: {},
   reservations: {},
+  // Append-only money history: no softDelete, because a "deleted" ledger row
+  // would silently change a balance the shop has already shown a customer.
+  // Delete is rejected for these tables; a correction is an adjustment row.
+  party_ledger: {},
+  commitments: {},
+  // commitment_items is deliberately NOT listed yet: it has no shop_id, and the
+  // pull scopes every table on (shop_id, updated_at). It joins the list in the
+  // same migration that gives it a shop_id — listing it now would just log a
+  // per-sync "column does not exist" error for every device.
 };
 
 /** Resolve a device from its bearer token. Sets req.device or leaves null. */

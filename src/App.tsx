@@ -12,6 +12,7 @@ import SalesHistory from "./modules/sales/SalesHistory";
 import Catalog from "./modules/catalog/Catalog";
 import Customers from "./modules/customers/Customers";
 import Vendors from "./modules/vendors/Vendors";
+import Ledger from "./modules/ledger/Ledger";
 import Accounts from "./modules/accounts/Accounts";
 import Expenses from "./modules/expenses/Expenses";
 import Reports from "./modules/reports/Reports";
@@ -33,13 +34,27 @@ function RequireAuth({ children }: { children: ReactNode }) {
  * Route gate. Admin/owner pass everything; anyone else needs the key in their
  * `users.permissions` list. The API enforces the same keys, so hiding the page
  * is a courtesy — the data is protected server-side too.
+ *
+ * `permission` gates on a single key; `anyOf` on any one of several, for pages
+ * that serve more than one module (the khata covers customers and vendors).
  */
-function RequirePermission({ permission, children }: { permission: string; children: ReactNode }) {
+function RequirePermission({
+  permission,
+  anyOf,
+  children,
+}: {
+  permission?: string;
+  anyOf?: string[];
+  children: ReactNode;
+}) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
   if (isAdminRole(user.role)) return <>{children}</>;
   if (!user.permissions || !Array.isArray(user.permissions)) return <Navigate to="/dashboard" replace />;
-  if (!user.permissions.includes(permission)) return <Navigate to="/dashboard" replace />;
+  const needed = anyOf ?? (permission ? [permission] : []);
+  if (!needed.some((k) => (user.permissions as string[]).includes(k))) {
+    return <Navigate to="/dashboard" replace />;
+  }
   return <>{children}</>;
 }
 
@@ -67,6 +82,9 @@ export default function App() {
             <Route path="/catalog" element={<RequirePermission permission="catalog.manage"><Catalog /></RequirePermission>} />
             <Route path="/customers" element={<RequirePermission permission="customers"><Customers /></RequirePermission>} />
             <Route path="/vendors" element={<RequirePermission permission="vendors"><Vendors /></RequirePermission>} />
+            {/* The khata is per-person: a customer statement and a supplier
+                statement are the same screen, so either party's key opens it. */}
+            <Route path="/ledger" element={<RequirePermission anyOf={["customers", "vendors"]}><Ledger /></RequirePermission>} />
             <Route path="/accounts" element={<RequirePermission permission="accounts"><Accounts /></RequirePermission>} />
             <Route path="/expenses" element={<RequirePermission permission="expenses.manage"><Expenses /></RequirePermission>} />
             <Route path="/reports" element={<RequirePermission permission="reports"><Reports /></RequirePermission>} />

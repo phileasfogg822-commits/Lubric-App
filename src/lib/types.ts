@@ -245,6 +245,38 @@ export interface Reminder {
   vehicle_label?: string | null;
 }
 
+// ─── Khata / Party Ledger ─────────────────────────────────────────────────────
+// server/migrations/014_party_ledger.sql. Append-only: every movement affecting
+// a party's balance is a row, and balances/statements are derived from them.
+// A debit always INCREASES the balance — what the customer owes us, or what we
+// owe the vendor.
+
+export type PartyType = "customer" | "vendor";
+
+export type LedgerKind = "opening" | "bill" | "payment" | "return" | "adjustment";
+
+export type LedgerDirection = "debit" | "credit";
+
+export interface PartyLedgerRow {
+  id: number;
+  uuid: string;
+  shop_id: number;
+  party_type: PartyType;
+  party_id: number;
+  kind: LedgerKind;
+  direction: LedgerDirection;
+  amount: number;
+  order_id: number | null;
+  vendor_payable_id: number | null;
+  cash_movement_id: number | null;
+  commitment_id: number | null;
+  note: string;
+  occurred_at: string;
+  origin: string;
+  created_at: string;
+  updated_at: string | null;
+}
+
 // ─── POS Types ─────────────────────────────────────────────────────────────────
 
 export type CustomerType = "returning" | "walking" | "wholesale";

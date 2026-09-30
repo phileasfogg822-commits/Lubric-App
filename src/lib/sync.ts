@@ -19,6 +19,9 @@ export const SYNC_TABLES = [
   "orders", "order_items", "expenses", "accounts", "account_transactions",
   "purchase_orders", "vendor_payables", "reminders", "inspections",
   "cash_movements", "reservations",
+  // The khata + road bookings (migration 014). Mirrors SYNC_TABLES in
+  // server/index.js; commitment_items is still missing there (no shop_id).
+  "party_ledger", "commitments",
 ] as const;
 
 const OUTBOX_SCHEMA = `

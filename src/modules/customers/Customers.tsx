@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { dbSelect, dbExecute } from "../../lib/db";
 import { Page } from "../../components/Page";
 import { Modal } from "../../components/Modal";
@@ -68,13 +69,17 @@ export default function Customers() {
       {isLoading ? <div style={{ textAlign: "center", padding: 40 }}>Loading...</div> : !customers?.length ? <EmptyState title="No customers" message="Add your first customer" /> : (
         <div style={{ overflow: "auto" }}>
           <table className="table">
-            <thead><tr><th>Name</th><th>Phone</th><th>Type</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Phone</th><th>Type</th><th style={{ textAlign: "right" }}>Balance</th><th></th><th></th></tr></thead>
             <tbody>
               {customers.map((c: any) => (
                 <tr key={c.id}>
                   <td style={{ fontWeight: 500 }}>{c.name}</td>
                   <td>{c.phone || "—"}</td>
                   <td><span style={{ fontSize: "0.75rem", padding: "1px 6px", borderRadius: 4, background: c.customer_type === "wholesale" ? "#fef3c7" : "#e0f2fe", color: c.customer_type === "wholesale" ? "#92400e" : "#0369a1" }}>{c.customer_type}</span></td>
+                  <td style={{ textAlign: "right", fontWeight: 600, color: Number(c.credit_balance) > 0 ? "#b91c1c" : "#64748b" }}>
+                    {Number(c.credit_balance) > 0 ? Number(c.credit_balance).toLocaleString() : "—"}
+                  </td>
+                  <td><Link className="btn btn-ghost btn-sm" to={`/ledger?id=${c.id}`}>Khata</Link></td>
                   <td><button className="btn btn-ghost btn-sm" onClick={() => openFollowUp(c)}>🔔 Follow-up</button></td>
                   <td><button className="btn btn-ghost btn-sm" onClick={() => openEdit(c)}>Edit</button></td>
                 </tr>
