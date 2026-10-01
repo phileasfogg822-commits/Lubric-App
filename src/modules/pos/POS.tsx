@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { dbSelect } from "../../lib/db";
+import { dbSelect, dbExecute } from "../../lib/db";
 import { useAuth } from "../../lib/auth";
 import { currency } from "../../lib/format";
 import type { Product, CustomerType, CartItem } from "../../lib/types";
@@ -8,6 +8,13 @@ import POSSearch, { type SearchResult } from "./POSSearch";
 import POSPrint from "./POSPrint";
 import { addProduct, addService, addContainer, updateQty, updatePrice, completeSale, releaseLeftoverToCustomer, leftoverLitres, packLitres, repriceAll, updateCapacity, toggleBillByCapacity, toggleLeftoverToContainers, tierPrice, type SaleVehicle } from "./POSCart";
 import Suggestions from "../../components/Suggestions";
+import {
+  buildPriceMemory,
+  formatMemoryLine,
+  PRICE_MEMORY_SQL,
+  WALKING_PROMOTION_THRESHOLD,
+  type PriceMemoryRow,
+} from "../../lib/priceMemory";
 
 export default function POS() {
   const { user } = useAuth();
@@ -41,6 +48,37 @@ export default function POS() {
   const [showVehicleSuggest, setShowVehicleSuggest] = useState(false);
   // Remembered engine oil capacity from the customer's vehicle, applied to new lines.
   const [defaultCapacity, setDefaultCapacity] = useState(0);
+  // Party-wise price memory: what this customer last paid for each product in
+  // the cart, and for how many litres. Strictly per customer - a product's list
+  // price is never offered as a stand-in, because a price someone else paid is
+  // a different deal.
+  const [memoryRows, setMemoryRows] = useState<PriceMemoryRow[]>([]);
+
+  /** Product ids currently in the cart, for the memory query key. */
+  const cartProductIds = cart
+    .filter((x) => x.kind === "product")
+    .map((x) => x.ref_id)
+    .sort((a, b) => a - b)
+    .join(",");
+
+  /**
+   * Fetch the customer's price history for everything in the cart - one query,
+   * not one per line. Keyed on the cart contents so adding a second product
+   * extends the same query rather than restarting per keystroke.
+   */
+  useEffect(() => {
+    const ids = cart.filter((x) => x.kind === "product").map((x) => x.ref_id);
+    if (!customerId || ids.length === 0) { setMemoryRows([]); return; }
+    const uniq = [...new Set(ids)];
+    let cancelled = false;
+    dbSelect<PriceMemoryRow>(
+      PRICE_MEMORY_SQL(customerId, uniq.length),
+      [customerId, ...uniq],
+    )
+      .then((rows) => { if (!cancelled) setMemoryRows(rows ?? []); })
+      .catch((e) => { if (!cancelled) { setMemoryRows([]); console.error("Price memory failed:", e); } });
+    return () => { cancelled = true; };
+  }, [customerId, cartProductIds]);
 
   const { data: products } = useQuery({ queryKey: ["products"], queryFn: () => dbSelect<Product>("SELECT * FROM products WHERE active = 1 ORDER BY name") });
   const { data: services } = useQuery({ queryKey: ["services"], queryFn: () => dbSelect<any>("SELECT * FROM services WHERE active = 1 ORDER BY name") });
@@ -48,6 +86,27 @@ export default function POS() {
   const { data: accounts } = useQuery({ queryKey: ["accounts"], queryFn: () => dbSelect<any>("SELECT id, name, type FROM accounts WHERE active = 1 ORDER BY name") });
 
   const total = cart.reduce((s, x) => s + x.line_total, 0);
+
+  /** Pack size per product, so a past sale with no capacity reads as the bottle. */
+  const packMap = useMemo(() => {
+    const m: Record<number, number> = {};
+    for (const p of (products ?? []) as Product[]) m[p.id] = packLitres(p);
+    return m;
+  }, [products]);
+
+  /**
+   * The memory, keyed by product, narrowed to the litres each cart line is
+   * about to bill. Type 3.5L into the Capacity box and only what was sold at
+   * 3.5L to this customer qualifies; leave it blank and the most recent sale is
+   * shown with whatever litres that one was.
+   */
+  const memoryByProduct = useMemo(() => {
+    const wanted: Record<number, number> = {};
+    for (const line of cart) {
+      if (line.kind === "product") wanted[line.ref_id] = Number(line.capacity ?? 0);
+    }
+    return buildPriceMemory(memoryRows, { wantedLitres: wanted, packLitres: packMap, limit: 2 });
+  }, [memoryRows, cart, packMap]);
 
   // Load a customer's order history into the right-hand panel.
   const loadHistory = useCallback(async (cust: any) => {
@@ -62,12 +121,51 @@ export default function POS() {
         "SELECT COALESCE(SUM(total), 0) as total FROM orders WHERE customer_id = $1 AND status = 'completed'",
         [cust.id]
       );
-      setCustomerHistory({ customer: cust, orders, totalSpent: totalSpent[0]?.total || 0 });
+      // Repeat-visit count, which is what makes "make them a returning
+      // customer" worth offering rather than noise.
+      const billCount = await dbSelect<any>(
+        "SELECT COUNT(*)::int AS n FROM orders WHERE customer_id = $1 AND status = 'completed'",
+        [cust.id]
+      );
+      // Recent product lines for the panel, newest first. NOT `DISTINCT ON`:
+      // that is Postgres-only and would break the offline desktop. Dedupe to
+      // one row per product in buildPriceMemory instead.
+      const recentLines = await dbSelect<PriceMemoryRow>(
+        `SELECT oi.ref_id, oi.product_name, oi.unit_price, oi.qty,
+                oi.capacity, oi.billed_by_capacity,
+                o.id AS order_id, o.created_at
+           FROM order_items oi
+           JOIN orders o ON o.id = oi.order_id
+          WHERE o.customer_id = $1
+            AND o.status = 'completed'
+            AND oi.kind = 'product'
+          ORDER BY o.created_at DESC, oi.id DESC
+          LIMIT 60`,
+        [cust.id]
+      );
+      const memory = [
+        ...buildPriceMemory(recentLines, { packLitres: packMap, limit: 1 }).values(),
+      ]
+        .flat()
+        .slice(0, 8);
+
+      setCustomerHistory({
+        customer: cust,
+        orders,
+        totalSpent: totalSpent[0]?.total || 0,
+        bills: Number(billCount[0]?.n ?? 0),
+        memory,
+        promoted: false,
+      });
     } catch (e) {
       console.error("History load failed:", e);
-      setCustomerHistory({ customer: cust, orders: [], totalSpent: 0 });
+      // Every field the panel reads, so a failed history still renders cleanly
+      // instead of showing "undefined bills".
+      setCustomerHistory({ customer: cust, orders: [], totalSpent: 0, bills: 0, memory: [], promoted: false });
     }
-  }, []);
+    // packMap resolves "this was the whole bottle" for past sales that recorded
+    // no capacity, so the memory shows litres rather than a bare price.
+  }, [packMap]);
 
   // Picking a suggestion applies the saved pricing tier and loads history at once.
   const pickCustomer = useCallback((cust: any) => {
@@ -105,6 +203,51 @@ export default function POS() {
       }
     }).catch(() => { /* no vehicle on file — leave the form as-is */ });
   }, [loadHistory]);
+
+  // Click a remembered price in the panel: add the product to the bill at that
+  // price rather than the list price, which is the whole point of remembering.
+  const addFromMemory = useCallback((refId: number, unitPrice: number) => {
+    const p = (products ?? []).find((x: Product) => x.id === refId);
+    if (!p) return;
+    setCart((c) => {
+      const next = addProduct(c, p, customerType, products ?? []);
+      return next.map((x) =>
+        x.kind === "product" && x.ref_id === refId
+          ? { ...x, unit_price: unitPrice, line_total: unitPrice * x.qty }
+          : x
+      );
+    });
+  }, [products, customerType]);
+
+  /**
+   * Promote a walking customer to a returning one.
+   *
+   * A "walking" customer is a real customer row, so once they keep coming back
+   * they are no longer walk-ins and should be billed at the returning tier
+   * (pf() picks price_walking for walking and price_returning for returning).
+   * That tier change is the whole point - and the reason this is offered only
+   * after repeat visits, or manually, rather than automatically.
+   */
+  const promoteToReturning = useCallback(async () => {
+    const c = customerHistory?.customer;
+    if (!c?.id) return;
+    if (!confirm(
+      `Make ${c.name} a returning customer?\n\n` +
+      `Their default price becomes the returning-customer price instead of the ` +
+      `walk-in price. Past bills are not changed.`
+    )) return;
+    try {
+      await dbExecute("UPDATE customers SET customer_type = 'returning', updated_at = NOW() WHERE id = $1", [c.id]);
+      const updated = { ...c, customer_type: "returning" };
+      setCustomerType("returning");
+      setCustomerHistory({ ...customerHistory, customer: updated });
+      setCart((c2) => repriceAll(c2, "returning"));
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      setSuccess(`${c.name} is now a returning customer.`);
+    } catch (e: any) {
+      setError(`Could not change the customer type: ${e?.message ?? e}`);
+    }
+  }, [customerHistory, qc]);
 
   // Find customer by the exact name typed (fallback when nothing is picked).
   const findCustomer = useCallback(async (name: string) => {
@@ -410,6 +553,36 @@ export default function POS() {
                   <div style={{ flex:1, textAlign:"right", fontWeight:600, fontSize:"0.85rem" }}>{currency(item.line_total)}</div>
                 </div>
                 {item.kind === "product" && (() => {
+                  const mem = memoryByProduct.get(item.ref_id) ?? [];
+                  return mem.length > 0 ? (
+                    <div style={{ marginTop: 3, marginBottom: 2 }}>
+                      {mem.map((m) => (
+                        <button
+                          key={`${m.orderId}-${m.unitPrice}`}
+                          type="button"
+                          onClick={() => handleUpdatePrice(item.id, m.unitPrice)}
+                          title={`Use ${currency(m.unitPrice)} — what this customer last paid on ${String(m.at).slice(0, 10)}`}
+                          style={{
+                            display: "block",
+                            width: "100%",
+                            textAlign: "left",
+                            border: "none",
+                            background: "none",
+                            padding: "1px 0",
+                            cursor: "pointer",
+                            fontSize: "0.68rem",
+                            color: "#0369a1",
+                            lineHeight: 1.35,
+                          }}
+                        >
+                          {m.prorated && <span style={{ color: "#b45309" }}>~</span>}
+                          last {formatMemoryLine(m, currency)}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null;
+                })()}
+                {item.kind === "product" && (() => {
                   const pack = packLitres(item.product);
                   const lo = leftoverLitres(item);
                   const byCap = !!item.billByCapacity;
@@ -476,10 +649,41 @@ export default function POS() {
                 {customerHistory.customer.phone && <span>{customerHistory.customer.phone} · </span>}
                 <span style={{ textTransform:"capitalize" }}>{customerHistory.customer.customer_type}</span>
               </div>
-              <div style={{ display:"flex", gap:12, marginTop:6, fontSize:"0.7rem" }}>
+              <div style={{ display:"flex", gap:12, marginTop:6, fontSize:"0.7rem", flexWrap:"wrap", alignItems:"center" }}>
                 <span style={{ color:"#16a34a" }}>Spent: {currency(customerHistory.totalSpent)}</span>
                 {customerHistory.customer.credit_balance > 0 && <span style={{ color:"#dc2626" }}>Credit: {currency(customerHistory.customer.credit_balance)}</span>}
+                <span style={{ color:"#64748b" }}>{customerHistory.bills} bill{customerHistory.bills === 1 ? "" : "s"}</span>
+                {/* A walk-in who keeps coming back is not a walk-in. Offered
+                    after the named threshold of repeat bills, and it changes
+                    which list price applies from now on - so never automatic. */}
+                {customerHistory.customer.customer_type === "walking" &&
+                  (customerHistory.bills >= WALKING_PROMOTION_THRESHOLD || customerHistory.promoted) && (
+                    <button type="button" onClick={promoteToReturning}
+                      style={{ fontSize:"0.65rem", padding:"1px 7px", borderRadius:3, cursor:"pointer", background:"#ecfdf5", color:"#047857", border:"1px solid #a7f3d0" }}>
+                      Make returning customer
+                    </button>
+                  )}
               </div>
+              {/* Price memory, so the last agreed price is visible without
+                  opening three bills to dig for it. Click to add the product. */}
+              {customerHistory.memory?.length > 0 && (
+                <div style={{ marginTop:8, paddingTop:6, borderTop:"1px solid #e2e8f0" }}>
+                  <div style={{ fontSize:"0.62rem", fontWeight:600, color:"#64748b", textTransform:"uppercase", marginBottom:3 }}>
+                    Prices you last sold
+                  </div>
+                  {customerHistory.memory.map((m: any) => (
+                    <button key={`${m.orderId}-${m.unitPrice}`} type="button"
+                      onClick={() => addFromMemory(m.refId, m.unitPrice)}
+                      title="Add to this bill at that price"
+                      style={{ display:"block", width:"100%", textAlign:"left", border:"none", background:"none", padding:"2px 0", cursor:"pointer", fontSize:"0.7rem", color:"#0369a1" }}>
+                      {m.litres > 0 ? `${m.litres}L · ` : ""}
+                      <span style={{ color:"#334155" }}>{m.productName}</span>
+                      <br />
+                      <span style={{ color:"#64748b" }}>{currency(m.unitPrice)} · {String(m.at).slice(0, 10)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div style={{ flex:1, overflow:"auto", padding:"8px 12px" }}>
               <div style={{ fontSize:"0.7rem", fontWeight:600, color:"#64748b", textTransform:"uppercase", marginBottom:6 }}>Recent Orders</div>

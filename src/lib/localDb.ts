@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_
 export const LOCAL_SCHEMA_2 = `
 CREATE TABLE IF NOT EXISTS account_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, amount REAL NOT NULL, type TEXT DEFAULT 'in', reference TEXT DEFAULT '', related_account_id INTEGER, created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, customer_id INTEGER, user_id INTEGER NOT NULL, total REAL DEFAULT 0, paid_amount REAL DEFAULT 0, payment_account_id INTEGER, payment_method TEXT DEFAULT 'cash', status TEXT DEFAULT 'completed', vehicle_id INTEGER, mileage INTEGER DEFAULT 0, notes TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')));
-CREATE TABLE IF NOT EXISTS order_items (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, kind TEXT NOT NULL, ref_id INTEGER NOT NULL, product_name TEXT DEFAULT '', qty REAL DEFAULT 1, unit_price REAL DEFAULT 0, line_total REAL DEFAULT 0, container_id INTEGER);
+CREATE TABLE IF NOT EXISTS order_items (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, kind TEXT NOT NULL, ref_id INTEGER NOT NULL, uuid TEXT, shop_id INTEGER DEFAULT 1, product_name TEXT DEFAULT '', qty REAL DEFAULT 1, unit_price REAL DEFAULT 0, line_total REAL DEFAULT 0, container_id INTEGER, capacity REAL DEFAULT 0, leftover_litres REAL DEFAULT 0, leftover_to TEXT DEFAULT 'customer', leftover_released INTEGER DEFAULT 0, billed_by_capacity INTEGER DEFAULT 0, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS used_oil_drum (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, current_litres REAL DEFAULT 0, capacity REAL DEFAULT 200);
 CREATE TABLE IF NOT EXISTS used_oil_log (id INTEGER PRIMARY KEY AUTOINCREMENT, drum_id INTEGER NOT NULL, litres REAL NOT NULL, type TEXT DEFAULT 'added', source_order_id INTEGER, created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, category TEXT NOT NULL, subcategory TEXT DEFAULT '', amount REAL DEFAULT 0, account_id INTEGER, date TEXT, note TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')));
@@ -204,6 +204,19 @@ const SYNC_COLUMN_PATCHES: { table: string; column: string; decl: string }[] = [
   { table: "vendor_payables", column: "uuid", decl: "TEXT" },
   { table: "vendor_payables", column: "shop_id", decl: "INTEGER DEFAULT 1" },
   { table: "vendor_payables", column: "updated_at", decl: "TEXT" },
+  // order_items: the sync agent inserts EVERY server column except id, so a
+  // local table missing any of these does not degrade - it throws "no such
+  // column" and takes the whole pull down with it. These arrived on the server
+  // in stages (uuid/shop_id/updated_at in 012, the litre/leftover set with the
+  // capacity-billing work) and the local table was never widened to match.
+  { table: "order_items", column: "uuid", decl: "TEXT" },
+  { table: "order_items", column: "shop_id", decl: "INTEGER DEFAULT 1" },
+  { table: "order_items", column: "updated_at", decl: "TEXT" },
+  { table: "order_items", column: "capacity", decl: "REAL DEFAULT 0" },
+  { table: "order_items", column: "leftover_litres", decl: "REAL DEFAULT 0" },
+  { table: "order_items", column: "leftover_to", decl: "TEXT DEFAULT 'customer'" },
+  { table: "order_items", column: "leftover_released", decl: "INTEGER DEFAULT 0" },
+  { table: "order_items", column: "billed_by_capacity", decl: "INTEGER DEFAULT 0" },
 ];
 
 async function patchSyncColumns(db: { select: (s: string) => Promise<unknown>; execute: (s: string) => Promise<unknown> }): Promise<void> {
@@ -228,6 +241,12 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       await patchSyncColumns(db);
       await db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_vendor_payables_uuid ON vendor_payables(uuid)"
+      );
+      // The sync pull upserts on uuid, so the local table needs it UNIQUE -
+      // without this, replaying the same rows raises a constraint error and the
+      // offline replica silently stops accepting them.
+      await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_order_items_uuid ON order_items(uuid)"
       );
     })().catch((e) => {
       schemaReady = null; // allow retry on next query
