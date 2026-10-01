@@ -115,9 +115,13 @@ void main() {
 
       expect(steps, isNotEmpty, reason: 'no migration steps found at all');
       for (final s in steps) {
-        expect(s, lessThan(version),
+        // A step keyed `from < N` is DEAD once the version reaches N, because
+        // sqflite never calls onUpgrade from the current version to itself. So
+        // the requirement is N <= version, not N < version.
+        expect(s, lessThanOrEqualTo(version),
             reason: 'migration step "from < $s" can never run - the database '
-                'is already at version $version');
+                'is already at version $version, so this step is unreachable '
+                'and whatever it adds is missing on every upgraded phone');
       }
       expect(steps.toSet().length, steps.length,
           reason: 'two migration steps share the same version number');
