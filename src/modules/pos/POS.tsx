@@ -5,6 +5,7 @@ import { useAuth } from "../../lib/auth";
 import { currency } from "../../lib/format";
 import type { Product, CustomerType, CartItem } from "../../lib/types";
 import POSSearch, { type SearchResult } from "./POSSearch";
+import { usePriceContext } from "./usePriceContext";
 import POSPrint from "./POSPrint";
 import { addProduct, addService, addContainer, updateQty, updatePrice, completeSale, releaseLeftoverToCustomer, leftoverLitres, packLitres, repriceAll, updateCapacity, toggleBillByCapacity, toggleLeftoverToContainers, tierPrice, type SaleVehicle } from "./POSCart";
 import Suggestions from "../../components/Suggestions";
@@ -23,6 +24,8 @@ export default function POS() {
   const [customerId, setCustomerId] = useState<number | null>(null);
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerType, setCustomerType] = useState<CustomerType>("walking");
+  // The selected customer's price list and any individually agreed prices.
+  const priceCtx = usePriceContext(customerId);
   const [paymentAccountId, setPaymentAccountId] = useState(1);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [notes, setNotes] = useState("");
@@ -167,6 +170,20 @@ export default function POS() {
     // no capacity, so the memory shows litres rather than a bare price.
   }, [packMap]);
 
+  // Re-price the whole cart whenever the answer could have changed.
+  //
+  // The customer's price context arrives asynchronously, so picking a customer
+  // cannot re-price correctly on the spot: at that moment the list has not
+  // loaded and the cart would be priced from the product's tier columns. This
+  // effect runs again the moment the context lands, which is what makes the
+  // cart show the customer's real price rather than the previous customer's.
+  //
+  // Keyed on the context and the tier, never on the cart - otherwise every
+  // quantity edit would re-trigger it and fight the edit that just happened.
+  useEffect(() => {
+    setCart((c) => repriceAll(c, customerType, priceCtx));
+  }, [priceCtx, customerType]);
+
   // Picking a suggestion applies the saved pricing tier and loads history at once.
   const pickCustomer = useCallback((cust: any) => {
     setCustomerName(cust.name);
@@ -210,7 +227,7 @@ export default function POS() {
     const p = (products ?? []).find((x: Product) => x.id === refId);
     if (!p) return;
     setCart((c) => {
-      const next = addProduct(c, p, customerType, products ?? []);
+      const next = addProduct(c, p, customerType, products ?? [], priceCtx);
       return next.map((x) =>
         x.kind === "product" && x.ref_id === refId
           ? { ...x, unit_price: unitPrice, line_total: unitPrice * x.qty }
@@ -343,7 +360,7 @@ export default function POS() {
   /** The line's tier price before capacity pro-rating, for the "was → now" hint. */
   function tierFullPrice(item: CartItem): number {
     if (!item.product) return item.unit_price;
-    return tierPrice(item.product, customerType, item.qty);
+    return tierPrice(item.product, customerType, item.qty, priceCtx);
   }
 
   function handleNameKeyDown(e: React.KeyboardEvent) {
@@ -398,18 +415,19 @@ export default function POS() {
       const p = products?.find((pr) => pr.id === item.id);
       if (p) setCart((c) => {
         const cap = defaultCapacity;
-        const next = addProduct(c, p, customerType, products ?? []);
+        const next = addProduct(c, p, customerType, products ?? [], priceCtx);
         if (!(cap > 0)) return next;
         // Apply the remembered capacity, then re-price so the pro-rating lands.
         return repriceAll(
           next.map((x) => x.kind === "product" && !x.capacity ? { ...x, capacity: cap } : x),
-          customerType
+          customerType,
+          priceCtx
         );
       });
     } else if (item.type === "service") {
       setCart((c) => addService(c, item.raw));
     } else if (item.type === "container") {
-      setCart((c) => addContainer(c, item.raw, customerType, products ?? []));
+      setCart((c) => addContainer(c, item.raw, customerType, products ?? [], priceCtx));
     } else if (item.type === "used_oil") {
       const q = prompt("Litres of used oil received:", "5");
       if (!q) return;
@@ -420,7 +438,7 @@ export default function POS() {
   }
 
   function handleUpdateQty(id: string, qty: number) {
-    setCart((c) => updateQty(c, id, qty, customerType));
+    setCart((c) => updateQty(c, id, qty, customerType, priceCtx));
   }
 
   function handleUpdatePrice(id: string, price: number) {
@@ -491,7 +509,7 @@ export default function POS() {
         </div>
         <div style={{ display: "flex", gap: 2 }}>
           {([["walking","W"],["returning","R"],["wholesale","Wh"]] as [CustomerType,string][]).map(([tier,label]) => (
-            <button key={tier} onClick={() => { setCustomerType(tier); setCart((c) => repriceAll(c, tier)); }} style={{ padding:"4px 10px", fontSize:"0.7rem", fontWeight:600, borderRadius:4, cursor:"pointer", background: customerType===tier ? "#cbd5e1" : "#f1f5f9", color: customerType===tier ? "#1e293b" : "#64748b", border: `1px solid ${customerType===tier ? "#94a3b8" : "#e2e8f0"}` }}>{label}</button>
+            <button key={tier} onClick={() => { setCustomerType(tier); setCart((c) => repriceAll(c, tier, priceCtx)); }} style={{ padding:"4px 10px", fontSize:"0.7rem", fontWeight:600, borderRadius:4, cursor:"pointer", background: customerType===tier ? "#cbd5e1" : "#f1f5f9", color: customerType===tier ? "#1e293b" : "#64748b", border: `1px solid ${customerType===tier ? "#94a3b8" : "#e2e8f0"}` }}>{label}</button>
           ))}
         </div>
         <select className="input" value={paymentAccountId} onChange={(e) => setPaymentAccountId(Number(e.target.value))} style={{ fontSize:"0.8rem", width:130 }}>
@@ -762,7 +780,7 @@ export default function POS() {
         )}
       </div>
       <div style={{ padding:"10px 16px", borderTop:"1px solid var(--color-border)", background:"white" }}>
-        <POSSearch onSelect={handleSearchSelect} customerType={customerType} />
+        <POSSearch onSelect={handleSearchSelect} customerType={customerType} priceCtx={priceCtx} />
         {lastSale && cart.length === 0 && (
           <div style={{ marginTop:8, display:"flex", alignItems:"center", gap:10 }}>
             <span style={{ fontSize:"0.75rem", color:"#16a34a" }}>Order #{lastSale.orderId} · {currency(lastSale.total)}</span>

@@ -220,6 +220,63 @@ CREATE TABLE IF NOT EXISTS stock_movements (
 CREATE INDEX IF NOT EXISTS idx_stock_item ON stock_movements(shop_id, item_id, occurred_at);
 `;
 
+// Part 6: price lists (server/migrations/028_price_lists.sql).
+//
+// These must exist locally even though they are read-only here, because
+// usePriceContext() queries them on every customer selection. A missing table
+// does not degrade - it throws "no such table", the query rejects, and the POS
+// loses its pricing for that customer. Exactly the failure order_items had.
+export const LOCAL_SCHEMA_6 = `
+CREATE TABLE IF NOT EXISTS price_lists (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid           TEXT UNIQUE,
+  shop_id        INTEGER DEFAULT 1,
+  name           TEXT NOT NULL,
+  code           TEXT,
+  is_default     INTEGER DEFAULT 0,
+  markup_pct     REAL DEFAULT 0,
+  rounding_mode  TEXT DEFAULT 'none',
+  rounding_value REAL DEFAULT 0,
+  active         INTEGER DEFAULT 1,
+  created_at     TEXT DEFAULT (datetime('now')),
+  updated_at     TEXT
+);
+CREATE TABLE IF NOT EXISTS price_list_items (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  price_list_id INTEGER NOT NULL,
+  product_id    INTEGER NOT NULL,
+  price         REAL,
+  min_qty       REAL,
+  created_at    TEXT DEFAULT (datetime('now')),
+  updated_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pli_list ON price_list_items(price_list_id, product_id);
+
+CREATE TABLE IF NOT EXISTS party_price_lists (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id       INTEGER DEFAULT 1,
+  party_type    TEXT NOT NULL,
+  party_id      INTEGER NOT NULL,
+  price_list_id INTEGER NOT NULL,
+  created_at    TEXT DEFAULT (datetime('now')),
+  updated_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ppl_party ON party_price_lists(party_type, party_id);
+
+CREATE TABLE IF NOT EXISTS party_prices (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id    INTEGER DEFAULT 1,
+  party_type TEXT NOT NULL,
+  party_id   INTEGER NOT NULL,
+  product_id INTEGER NOT NULL,
+  price      REAL NOT NULL,
+  note       TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pp_party ON party_prices(party_type, party_id);
+`;
+
 /**
  * Columns the sync layer needs that this schema predates: 012_sync added uuid,
  * shop_id and updated_at to every replicated table, but an existing local
@@ -267,6 +324,7 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       await db.execute(LOCAL_SCHEMA_3);
       await db.execute(LOCAL_SCHEMA_4);
       await db.execute(LOCAL_SCHEMA_5);
+      await db.execute(LOCAL_SCHEMA_6);
       await db.execute(LOCAL_SEED);
       // Columns first, then the index that depends on them.
       await patchSyncColumns(db);

@@ -3,6 +3,7 @@ import { dbGet, dbExecute, dbSelect, dbTransaction } from "../../lib/db";
 
 import { stockOut } from "../../lib/stock";
 import { newUuid } from "../../lib/uuid";
+import { resolvePrice, type PriceSource } from "../../lib/pricing";
 
 export type { CartItem };
 
@@ -26,14 +27,26 @@ export function leftoverLitres(item: CartItem): number {
   return Math.round((pack - cap) * 1000) / 1000;
 }
 
-export function pf(p: Product, t: CustomerType, q: number) {
-  if (t === "walking") return { p: p.price_walking ?? p.price_returning, m: p.price_walking == null };
-  if (t === "wholesale") {
-    const ok = q >= (p.wholesale_min_qty || 10);
-    if (ok && p.price_wholesale > 0) return { p: p.price_wholesale, m: false };
-    return { p: p.price_returning, m: false };
-  }
-  return { p: p.price_returning, m: false };
+/**
+ * Price for one line, before any capacity pro-rating.
+ *
+ * This used to be `pf()`, a second copy of the tier rules that already lived in
+ * POSSearch.tsx. Two copies of a pricing rule is how a customer gets quoted one
+ * number in the search results and charged another in the cart, so the rule now
+ * lives once in src/lib/pricing.ts and both screens call it.
+ *
+ * `ctx` is the customer's price context (their price list and any individually
+ * agreed prices). It is optional and defaults to empty, which resolves through
+ * the product's own tier columns exactly as before - that fallback is what lets
+ * this ship without changing a single price the shop already charges.
+ */
+export function tierPrice(
+  p: Product,
+  ct: CustomerType,
+  qty: number,
+  ctx: PriceSource = {}
+): number {
+  return resolvePrice(p.id, ct, qty, { ...ctx, product: p }).price || 0;
 }
 
 /**
@@ -51,30 +64,36 @@ export function effectiveUnitPrice(item: CartItem, tierPrice: number): number {
   return Math.round(tierPrice * (cap / pack) * 100) / 100; // paisa-safe
 }
 
-/** The tier price for a product line, before any capacity pro-rating. */
-export function tierPrice(p: Product, ct: CustomerType, qty: number): number {
-  const pr = pf(p, ct, qty);
-  return pr.m ? (p.price_returning || 0) : pr.p;
-}
-
 /** Re-price a single line from its product + tier, applying capacity pro-rating. */
-function reprice(item: CartItem, ct: CustomerType): CartItem {
+function reprice(item: CartItem, ct: CustomerType, ctx: PriceSource): CartItem {
   if (item.kind !== "product" || !item.product) return item;
-  const u = effectiveUnitPrice(item, tierPrice(item.product, ct, item.qty));
+  const u = effectiveUnitPrice(item, tierPrice(item.product, ct, item.qty, ctx));
   return { ...item, unit_price: u, line_total: u * item.qty };
 }
 
-/** Re-price every product line — used when the tier switches. */
-export function repriceAll(cart: CartItem[], ct: CustomerType): CartItem[] {
-  return cart.map((x) => reprice(x, ct));
+/**
+ * Re-price every product line.
+ *
+ * Called whenever the answer could have changed: the tier switched, a customer
+ * was chosen, or a capacity was entered. All three change what an item costs,
+ * so all three route through here rather than each nudging prices itself.
+ */
+export function repriceAll(cart: CartItem[], ct: CustomerType, ctx: PriceSource = {}): CartItem[] {
+  return cart.map((x) => reprice(x, ct, ctx));
 }
 
-export function addProduct(cart: CartItem[], p: Product, ct: CustomerType, products: Product[]): CartItem[] {
+export function addProduct(
+  cart: CartItem[],
+  p: Product,
+  ct: CustomerType,
+  products: Product[],
+  ctx: PriceSource = {}
+): CartItem[] {
   const ex = cart.find((x) => x.kind === "product" && x.ref_id === p.id);
   if (ex) return cart.map((x) => {
     if (x !== ex) return x;
     const nq = x.qty + 1;
-    const u = effectiveUnitPrice(x, tierPrice(p, ct, nq));
+    const u = effectiveUnitPrice(x, tierPrice(p, ct, nq, ctx));
     return { ...x, qty: nq, unit_price: u, line_total: u * nq };
   });
   const fresh: CartItem = {
@@ -83,7 +102,7 @@ export function addProduct(cart: CartItem[], p: Product, ct: CustomerType, produ
     // Defaults: charged for what the engine takes, remainder back on the shelf.
     billByCapacity: true, leftoverToContainers: true,
   };
-  const u = effectiveUnitPrice(fresh, tierPrice(p, ct, 1));
+  const u = effectiveUnitPrice(fresh, tierPrice(p, ct, 1, ctx));
   return [...cart, { ...fresh, unit_price: u, line_total: u }];
 }
 
@@ -93,23 +112,34 @@ export function addService(cart: CartItem[], s: { id: number; name: string; pric
   return [...cart, { id: `s-${s.id}-${Date.now()}`, kind: "service", ref_id: s.id, name: s.name, qty: 1, unit_price: s.price, line_total: s.price }];
 }
 
-export function addContainer(cart: CartItem[], c: any, ct: CustomerType, products: Product[]): CartItem[] {
+export function addContainer(
+  cart: CartItem[],
+  c: any,
+  ct: CustomerType,
+  products: Product[],
+  ctx: PriceSource = {}
+): CartItem[] {
   const ex = cart.find((x) => x.kind === "partial_container" && x.container_id === c.id);
   if (ex) return cart.map((x) => x === ex && x.qty < c.remaining_volume ? { ...x, qty: x.qty + 1, line_total: x.unit_price * (x.qty + 1) } : x);
   const p = products.find((pr: Product) => pr.id === c.product_id);
-  const pr = p ? pf(p, ct, 1) : { p: 0, m: true };
-  const u = pr.m ? (p?.price_returning || 0) : pr.p;
+  const u = p ? tierPrice(p, ct, 1, ctx) : 0;
   return [...cart, { id: `c-${c.id}-${Date.now()}`, kind: "partial_container", ref_id: c.id, name: `${c.product_name} (${c.remaining_volume.toFixed(1)}L left)`, qty: 1, unit_price: u, line_total: u, container_id: c.id, max_qty: c.remaining_volume }];
 }
 
-export function updateQty(cart: CartItem[], id: string, qty: number, ct: CustomerType): CartItem[] {
+export function updateQty(
+  cart: CartItem[],
+  id: string,
+  qty: number,
+  ct: CustomerType,
+  ctx: PriceSource = {}
+): CartItem[] {
   return cart.map((x) => {
     if (x.id !== id) return x;
     const max = x.max_qty ?? 9999;
     const nq = Math.max(0, Math.min(qty, max));
     if (nq === 0) return x;
     if (x.kind === "product" && x.product) {
-      const u = effectiveUnitPrice(x, tierPrice(x.product, ct, nq));
+      const u = effectiveUnitPrice(x, tierPrice(x.product, ct, nq, ctx));
       return { ...x, qty: nq, unit_price: u, line_total: u * nq };
     }
     return { ...x, qty: nq, line_total: x.unit_price * nq };

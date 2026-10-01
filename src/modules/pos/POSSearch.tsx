@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { dbSelect } from "../../lib/db";
 import { currency } from "../../lib/format";
 import type { CustomerType } from "../../lib/types";
+import { resolvePrice, type PriceSource } from "../../lib/pricing";
 import Suggestions from "../../components/Suggestions";
 
 export interface SearchResult {
@@ -22,19 +23,35 @@ export interface SearchResult {
 interface Props {
   onSelect: (item: SearchResult) => void;
   customerType: CustomerType;
+  /** The selected customer's price list and agreed prices, for resolvePrice. */
+  priceCtx?: PriceSource;
 }
 
-function getPrice(item: any, tier: CustomerType, qty: number): number {
-  if (tier === "walking") return item.price_walking ?? item.price_returning;
-  if (tier === "wholesale") {
-    const minQty = item.wholesale_min_qty || 10;
-    if (qty >= minQty && item.price_wholesale > 0) return item.price_wholesale;
-    return item.price_returning;
-  }
-  return item.price_returning;
+/**
+ * What this item costs to the customer in front of the shopkeeper.
+ *
+ * The rules used to be written out again here, duplicating the copy in
+ * POSCart.tsx. Two implementations of a price is how search shows one number
+ * and the cart charges another, so both now ask src/lib/pricing.ts, which is
+ * also where the customer's own price list is honoured - meaning the price in
+ * the dropdown is the price that will actually be billed.
+ */
+function priceFor(item: any, tier: CustomerType, qty: number, ctx: PriceSource): number {
+  return resolvePrice(item.id, tier, qty, {
+    ...ctx,
+    // A partial container inherits the pricing of the product it came from, so
+    // a customer on a negotiated price does not start paying list price for the
+    // last 2 litres someone else opened.
+    product: {
+      price_walking: item.price_walking,
+      price_returning: item.price_returning,
+      price_wholesale: item.price_wholesale,
+      wholesale_min_qty: item.wholesale_min_qty,
+    },
+  }).price || 0;
 }
 
-export default function POSSearch({ onSelect, customerType }: Props) {
+export default function POSSearch({ onSelect, customerType, priceCtx = {} }: Props) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -54,9 +71,9 @@ export default function POSSearch({ onSelect, customerType }: Props) {
         ]);
         const oilMatch = /oil|drum|used/i.test(query);
         const items: SearchResult[] = [
-          ...products.map((p: any) => ({ type: "product" as const, id: p.id, name: p.name, price: getPrice(p, customerType, 1), price_walking: p.price_walking, price_returning: p.price_returning, price_wholesale: p.price_wholesale, stock_qty: p.stock_qty, wholesale_min_qty: p.wholesale_min_qty, raw: p })),
+          ...products.map((p: any) => ({ type: "product" as const, id: p.id, name: p.name, price: priceFor(p, customerType, 1, priceCtx), price_walking: p.price_walking, price_returning: p.price_returning, price_wholesale: p.price_wholesale, stock_qty: p.stock_qty, wholesale_min_qty: p.wholesale_min_qty, raw: p })),
           ...services.map((s: any) => ({ type: "service" as const, id: s.id, name: s.name, price: s.price, price_walking: s.price, price_returning: s.price, price_wholesale: s.price, raw: s })),
-          ...containers.map((c: any) => ({ type: "container" as const, id: c.id, name: c.product_name, price: getPrice(c, customerType, 1), price_walking: c.price_walking, price_returning: c.price_returning, price_wholesale: c.price_wholesale, remaining_volume: c.remaining_volume, status: c.status, wholesale_min_qty: c.wholesale_min_qty, raw: c })),
+          ...containers.map((c: any) => ({ type: "container" as const, id: c.id, name: c.product_name, price: priceFor(c, customerType, 1, priceCtx), price_walking: c.price_walking, price_returning: c.price_returning, price_wholesale: c.price_wholesale, remaining_volume: c.remaining_volume, status: c.status, wholesale_min_qty: c.wholesale_min_qty, raw: c })),
         ...(drums.length && oilMatch ? [{ type: "used_oil" as const, id: drums[0].id, name: "Used Oil Drum (drop-off)", price: 0, price_walking: 0, price_returning: 0, price_wholesale: 0, remaining_volume: drums[0].current_litres, raw: drums[0] }] : []),
         ];
         setResults(items);

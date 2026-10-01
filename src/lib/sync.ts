@@ -26,6 +26,10 @@ export const SYNC_TABLES = [
   // item's stock is what it is, and reconcile products.stock_qty against
   // SUM(qty) without needing the server.
   "stock_movements",
+  // Price lists (migration 028). Replicated so the POS can price a customer
+  // from their own list while offline, instead of falling back to the tier
+  // columns and quietly charging walk-in prices to a wholesale customer.
+  "price_lists", "price_list_items", "party_price_lists", "party_prices",
 ] as const;
 
 const OUTBOX_SCHEMA = `

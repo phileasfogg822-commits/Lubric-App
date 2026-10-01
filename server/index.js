@@ -433,6 +433,13 @@ const SYNC_TABLES = {
   // party_ledger: deleting a movement would change a stock balance the shop has
   // already shown, so a mistake is corrected with a reversing row.
   stock_movements: {},
+  // Price lists (migration 028). Replicated so the desktop POS can price a
+  // customer from their own list while offline. Read-mostly, but still listed
+  // because the desktop reads them on every customer selection.
+  price_lists: {},
+  price_list_items: {},
+  party_price_lists: {},
+  party_prices: {},
 };
 
 /** Resolve a device from its bearer token. Sets req.device or leaves null. */
