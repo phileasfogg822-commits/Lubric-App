@@ -72,29 +72,47 @@ void main() {
   group('local schema cannot drift from the migration path', () {
     final db = File('lib/core/db.dart').readAsStringSync();
 
-    /// Columns the CREATE TABLE block in _createSchema declares.
-    Set<String> columnsInCreateSchema(String table) {
-      final start = db.indexOf("CREATE TABLE $table (");
-      expect(start, isNot(-1), reason: 'could not find CREATE TABLE $table');
-      final end = db.indexOf('b.execute(', start);
-      final block = db.substring(start, end == -1 ? db.length : end);
-      return {
-        for (final m in RegExp(r'^\s*(\w+)\s+[A-Z]', multiLine: true)
-            .allMatches(block))
-          m.group(1)!,
-      };
-    }
+    // The columns that existed at version 1 - the schema every phone installed
+    // before any migration existed. Anything written today must be in this set
+    // OR be added by an _upgrade step.
+    //
+    // Reading it against _createSchema instead would pass trivially, and that
+    // is precisely the miss that shipped 0.6.2: taken_by_name was in
+    // _createSchema (correctly, for fresh installs) and in no migration, so
+    // every already-installed phone threw "no such column" on save.
+    const v1CashMovements = {
+      'uuid', 'kind', 'amount', 'customer_uuid', 'customer_name',
+      'note', 'occurred_at', 'synced',
+    };
+    const v1Reservations = {
+      'uuid', 'customer_name', 'items_json', 'amount', 'status',
+      'note', 'created_at', 'synced',
+    };
 
     /// Columns _upgrade patches via _addColumnIfMissing.
     Set<String> columnsAddedByUpgrade() {
       final start = db.indexOf('static Future<void> _upgrade');
       final end = db.indexOf('/// SQLite has no', start);
       final block = db.substring(start, end == -1 ? db.length : end);
-      return {
-        for (final m in RegExp(r"_addColumnIfMissing\(\s*d,\s*'\w+',\s*'(\w+)'")
-            .allMatches(block))
-          m.group(1)!,
-      };
+      final out = <String>{};
+      final re = RegExp(r"_addColumnIfMissing\(\s*d,\s*'\w+',\s*'(\w+)'");
+      for (final m in re.allMatches(block)) {
+        out.add(m.group(1)!);
+      }
+      return out;
+    }
+
+    /// Every 'key': literal written in the body between [from] and [to].
+    Set<String> writtenColumns(String from, String to) {
+      final start = db.indexOf(from);
+      final end = db.indexOf(to, start);
+      final body = db.substring(start, end);
+      final out = <String>{};
+      final re = RegExp(r"'(\w+)':");
+      for (final m in re.allMatches(body)) {
+        out.add(m.group(1)!);
+      }
+      return out;
     }
 
     test('the schema version is bumped past every migration step', () {
@@ -116,43 +134,31 @@ void main() {
     });
 
     test('every column saveMovement writes exists after an upgrade', () {
-      final start = db.indexOf('Future<void> saveMovement');
-      final end = db.indexOf('Future<List<CashMovement>> movements', start);
-      final body = db.substring(start, end);
-
-      final written = {
-        for (final m in RegExp(r"'(\w+)':").allMatches(body)) m.group(1)!,
-      };
+      final written =
+          writtenColumns('Future<void> saveMovement', 'Future<List<CashMovement>> movements');
       expect(written, isNotEmpty, reason: 'could not read the insert columns');
 
-      final created = columnsInCreateSchema('cash_movements');
-      final added = columnsAddedByUpgrade();
-
+      final known = {...v1CashMovements, ...columnsAddedByUpgrade()};
       for (final col in written) {
         expect(
-          created.contains(col) || added.contains(col),
+          known.contains(col),
           isTrue,
           reason: 'saveMovement writes "$col", which is in neither the v1 '
-              'schema nor an _upgrade step. On every ALREADY-INSTALLED phone '
-              'that INSERT throws "no such column", the record is lost and the '
-              'user is shown nothing. Add it to _upgrade.',
+              'schema nor any _upgrade step. On every ALREADY-INSTALLED phone '
+              'that INSERT throws "no such column", the record is lost, and the '
+              'user is shown a button that spins forever. Add it to _upgrade.',
         );
       }
     });
 
     test('every column saveReservation writes exists after an upgrade', () {
-      final start = db.indexOf('Future<void> saveReservation');
-      final end = db.indexOf('Future<List<Reservation>> reservations', start);
-      final body = db.substring(start, end);
+      final written = writtenColumns(
+          'Future<void> saveReservation', 'Future<List<Reservation>> reservations');
+      expect(written, isNotEmpty);
 
-      final written = {
-        for (final m in RegExp(r"'(\w+)':").allMatches(body)) m.group(1)!,
-      };
-      final created = columnsInCreateSchema('reservations');
-      final added = columnsAddedByUpgrade();
-
+      final known = {...v1Reservations, ...columnsAddedByUpgrade()};
       for (final col in written) {
-        expect(created.contains(col) || added.contains(col), isTrue,
+        expect(known.contains(col), isTrue,
             reason: 'saveReservation writes "$col", which no upgrade path adds');
       }
     });

@@ -1,0 +1,5 @@
+Permission denied (user 2) needs team.manage :: SELECT id, name FROM devices
+Permission denied (user 2) needs team.manage :: INSERT INTO devices (shop_id, kind, name, pairing_code) VALUES (1, 'mobile', 'x', 'BADBAD0
+Permission denied (user 2) needs team.manage :: SELECT id, name FROM devices
+Permission denied (user 2) needs team.manage :: INSERT INTO devices (shop_id, kind, name, pairing_code) VALUES (1, 'mobile', 'x', 'BADBAD0
+Permission denied (user 2) needs team.manage :: UPDATE devices SET revoked = TRUE WHERE id = (SELECT MIN(id) FROM devices)
