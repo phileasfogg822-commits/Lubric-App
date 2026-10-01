@@ -229,8 +229,28 @@ export default function Dashboard() {
   );
   const hasTrend = trend.some((r) => r.revenue > 0 || r.cost > 0);
 
+  // Field collections are the same shop's money as a counter sale, so they are
+  // counted in the main figures and not just on their own page.
+  const fieldToday = useQuery({
+    queryKey: ["field_today"],
+    queryFn: () =>
+      dbGet<{ collected: number; rows: number }>(
+        `SELECT COALESCE(SUM(amount), 0) AS collected, COUNT(*) AS rows
+           FROM cash_movements
+          WHERE kind = 'collection' AND occurred_at::date = CURRENT_DATE`
+      ),
+  });
+
   const stats = [
     { label: "Today's Sales", value: currency(todaySales?.total ?? 0), sub: `${todaySales?.count ?? 0} orders` },
+    // Field collections are the SAME shop's money, so they belong in the main
+    // figures rather than only on their own page: a shop that sells mostly
+    // through collectors must see what they collected today up here.
+    {
+      label: "Collected Today (field)",
+      value: currency(fieldToday.data?.collected ?? 0),
+      sub: `${fieldToday.data?.rows ?? 0} from phones`,
+    },
     { label: "This Week", value: currency(weekSales?.total ?? 0), sub: `${weekSales?.count ?? 0} orders` },
     { label: "Profit (7d)", value: currency(weekProfit), sub: `best day ${bestDay.label}` },
     { label: "Active Products", value: String(counts?.products ?? 0), sub: "in catalog" },

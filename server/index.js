@@ -519,6 +519,101 @@ app.get('/api/v1/ping', async (req, res) => {
   }
 });
 
+/**
+ * Book a field collection into the shop's real books.
+ *
+ * Runs inside the push transaction, right after the row lands, so a collection
+ * and its accounting can never disagree. Three things move:
+ *
+ *   1. the customer's Khata  - a party_ledger payment (credit), which lowers
+ *      what they owe, so it shows on their statement and in the Khata;
+ *   2. the customer's balance - credit_balance, kept in step with the ledger;
+ *   3. the shop's cash       - accounts.balance plus an account_transactions
+ *      row, so the money is in the main account instead of invisible.
+ *
+ * Only `collection` moves money. A `handover` is the same money arriving at the
+ * till, so counting it again would double the day's cash; it only reduces what
+ * is still out with the phones, which is what "in hand" already reports.
+ *
+ * Idempotency is the whole design: the first statement claims the row with a
+ * conditional UPDATE. A retried push (the protocol upserts on uuid, so retries
+ * are normal) claims nothing and does nothing.
+ *
+ * An unmatched customer is not an error - the money is still banked as cash,
+ * because that part is certain. The party link is simply left off and the Field
+ * Activity page shows it as unlinked for the shop to match up.
+ */
+async function postFieldCollection(client, mv, shopId) {
+  const claim = await client.query(
+    `UPDATE cash_movements SET posted_at = NOW()
+      WHERE id = $1 AND posted_at IS NULL
+      RETURNING uuid, kind, amount, customer_uuid, customer_name, note, occurred_at`,
+    [mv.id],
+  );
+  if (!claim.rows.length) return; // already posted - a retry
+  const c = claim.rows[0];
+  if (c.kind !== 'collection') return;
+
+  // Resolve the party: the uuid first, because that is identity. The name is a
+  // fallback for rows collected before the phone sent one.
+  let cust = null;
+  if (c.customer_uuid) {
+    const r = await client.query(
+      'SELECT id, name FROM customers WHERE shop_id = $1 AND uuid = $2 LIMIT 1',
+      [shopId, c.customer_uuid],
+    );
+    cust = r.rows[0] || null;
+  }
+  if (!cust && c.customer_name) {
+    const r = await client.query(
+      'SELECT id, name FROM customers WHERE shop_id = $1 AND lower(name) = lower($2) LIMIT 1',
+      [shopId, c.customer_name],
+    );
+    cust = r.rows[0] || null;
+  }
+
+  if (cust) {
+    // Deterministic uuid from the movement's own, so a double post is rejected
+    // by the unique index rather than by hoping the balance maths matches.
+    const ins = await client.query(
+      `INSERT INTO party_ledger
+         (uuid, shop_id, party_type, party_id, kind, direction, amount,
+          cash_movement_id, note, occurred_at, origin)
+       VALUES ($1, $2, 'customer', $3, 'payment', 'credit', $4, $5, $6, $7, 'mobile')
+       ON CONFLICT (uuid) DO NOTHING
+       RETURNING id`,
+      [
+        'cm-' + c.uuid,
+        shopId,
+        cust.id,
+        c.amount,
+        mv.id,
+        c.note || `Collection from ${cust.name}`,
+        c.occurred_at,
+      ],
+    );
+    if (ins.rows.length) {
+      await client.query(
+        `UPDATE customers SET credit_balance = COALESCE(credit_balance, 0) - $1 WHERE id = $2`,
+        [c.amount, cust.id],
+      );
+    }
+  }
+
+  const acc = await client.query(
+    "SELECT id FROM accounts WHERE shop_id = $1 AND type = 'cash' AND active = 1 ORDER BY id LIMIT 1",
+    [shopId],
+  );
+  if (!acc.rows.length) return;
+  const accountId = acc.rows[0].id;
+  await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [c.amount, accountId]);
+  await client.query(
+    `INSERT INTO account_transactions (account_id, amount, type, reference)
+     VALUES ($1, $2, 'in', $3)`,
+    [accountId, c.amount, 'Field collection ' + String(c.uuid).slice(0, 8)],
+  );
+}
+
 /** Pull: everything changed since `since` (ms epoch), for this device's shop. */
 app.get('/api/v1/pull', async (req, res) => {
   if (!req.device) return res.status(401).json({ error: 'Device token required' });
@@ -680,6 +775,16 @@ app.post('/api/v1/push', async (req, res) => {
       try {
         await client.query(sqlText, vals);
         applied.push({ table, uuid, op });
+        // A collection is not just a row: post it into the cash account and the
+        // customer's Khata in the same transaction. Skipped for every other
+        // table, which is why this is here and not in the generic insert.
+        if (table === 'cash_movements') {
+          const r = await client.query(
+            'SELECT id FROM cash_movements WHERE uuid = $1 AND shop_id = $2',
+            [uuid, shopId],
+          );
+          if (r.rows.length) await postFieldCollection(client, r.rows[0], shopId);
+        }
       } catch (e) {
         rejected.push({ uuid, reason: e.message });
       }

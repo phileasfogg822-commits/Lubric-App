@@ -22,7 +22,7 @@ void main() {
         uuid: row['uuid'] as String,
         kind: MovementKind.parse(row['kind'] as String),
         amount: (row['amount'] as num).toDouble(),
-        customerUuid: 'c-1',
+        customerUuid: (row['customer_uuid'] as String?) ?? '',
         customerName: row['customer_name'] as String,
         note: row['note'] as String,
         occurredAt: DateTime.parse(row['occurred_at'] as String),

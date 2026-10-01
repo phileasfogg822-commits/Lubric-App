@@ -139,6 +139,22 @@ await check('a push is idempotent - a retry after a drop changes nothing', async
 
 await check('cleanup', async () => {
   if (deviceId) {
+    // A collection is now posted into the shop's cash account by the server -
+    // that is the behaviour under test. Reverse it, or the suite would quietly
+    // add money to a real shop every time it ran.
+    const ref = 'Field collection ' + String(fixture.movement.row.uuid).slice(0, 8);
+    const accs = await q(
+      "SELECT id FROM accounts WHERE shop_id = 1 AND type = 'cash' AND active = 1 ORDER BY id LIMIT 1",
+      [], atok);
+    if (accs.length) {
+      await post('/api/execute', {
+        sql: 'UPDATE accounts SET balance = balance - $1 WHERE id = $2',
+        params: [Number(fixture.movement.row.amount), accs[0].id],
+      }, atok);
+      await post('/api/execute', {
+        sql: 'DELETE FROM account_transactions WHERE reference = $1', params: [ref],
+      }, atok);
+    }
     await post('/api/execute', { sql: 'DELETE FROM devices WHERE id = $1', params: [deviceId] }, atok);
     await post('/api/execute', { sql: 'DELETE FROM cash_movements WHERE uuid = $1', params: [fixture.movement.row.uuid] }, atok);
     await post('/api/execute', { sql: 'DELETE FROM reservations WHERE uuid = $1', params: [fixture.reservation.row.uuid] }, atok);

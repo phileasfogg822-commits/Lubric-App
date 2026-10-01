@@ -31,10 +31,17 @@ class OutboxPayload {
   static const String mobileOrigin = 'mobile';
 
   /// A collection / handover / adjustment taken on the phone.
+  ///
+  /// `customer_uuid` is what actually identifies the party. `customer_name` is
+  /// only a label for the field user's benefit and for rows typed before the
+  /// picker existed; the shop matches on the uuid and falls back to the name.
+  /// Sending both is why a collection now lands on the right customer's Khata
+  /// instead of being an anonymous row in a silo.
   static Map<String, dynamic> movement(CashMovement m) => <String, dynamic>{
         'uuid': m.uuid,
         'kind': m.kind.name,
         'amount': m.amount,
+        'customer_uuid': m.customerUuid,
         'customer_name': m.customerName,
         'note': m.note,
         'occurred_at': m.occurredAt.toUtc().toIso8601String(),
@@ -98,6 +105,7 @@ class OutboxPayload {
           'uuid': uuid,
           'kind': text('kind').isEmpty ? 'collection' : text('kind'),
           'amount': number('amount'),
+          'customer_uuid': text('customer_uuid'),
           'customer_name': text('customer_name'),
           'note': text('note'),
           'occurred_at': utc('occurred_at', DateTime.now()),
