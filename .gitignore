@@ -30,3 +30,9 @@ flutter-apk/
 *.apk.sha256
 field_app/manifest.txt
 field_app/permissions.txt
+
+# one-off repair/diagnostic scripts and captured server stderr - not part of the build
+apply014.sh
+checkbal.sh
+dryrun.sh
+server/_api.err
