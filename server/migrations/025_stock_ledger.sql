@@ -92,7 +92,24 @@ SELECT gen_random_uuid()::text,
    AND COALESCE(p.stock_qty, 0) <> 0
    AND NOT EXISTS (SELECT 1 FROM stock_movements m WHERE m.item_id = p.id);
 
--- The ledger and the cache must agree, or the backfill is wrong.
+-- Proof in the deploy log, and a report of any drift.
+--
+-- This is deliberately a NOTICE, not a RAISE EXCEPTION, even though an earlier
+-- draft threw. Two reasons, both learned the hard way:
+--
+--   1. The migration runner re-executes every file on every boot, relying on
+--      each being idempotent. So this block runs again long after the backfill,
+--      long after the app has legitimately moved stock, and a hard throw here
+--      aborts the whole run - which meant it blocked migration 026, the very
+--      migration that reconciles the drift. A guard must never block its own
+--      repair.
+--   2. Once the app is live, stock legitimately moves. A cache/ledger
+--      difference is no longer evidence that the BACKFILL was wrong; it is the
+--      ledger correctly reporting that something changed stock outside it.
+--      That is a reconciliation task (026), not a reason to refuse to boot.
+--
+-- The hard guarantee - that the two agree before a financial report trusts the
+-- ledger - lives in 026, which runs after it has had the chance to fix things.
 DO $verify$
 DECLARE
   mismatches INTEGER;
@@ -106,8 +123,10 @@ BEGIN
      AND COALESCE(l.qty, 0) <> COALESCE(p.stock_qty, 0);
 
   IF mismatches > 0 THEN
-    RAISE EXCEPTION 'stock ledger disagrees with stock_qty on % item(s)', mismatches;
+    RAISE NOTICE 'stock ledger differs from stock_qty on % item(s) - reconciliation required',
+                 mismatches;
+  ELSE
+    RAISE NOTICE 'stock ledger opened; ledger and cache agree for every item';
   END IF;
-  RAISE NOTICE 'stock ledger opened; ledger and cache agree for every item';
 END
 $verify$;
