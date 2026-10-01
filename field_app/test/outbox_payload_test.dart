@@ -5,31 +5,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lubric_field/core/outbox_payload.dart';
 import 'package:lubric_field/models/models.dart';
 
-/// Guards a bug that shipped twice in the same week.
+/// Guards two bugs that shipped because a check was missing.
 ///
-/// The local SQLite schema is created by `_createSchema`, which sqflite runs
-/// ONLY on a fresh install. A column added there and not to `_upgrade` exists on
-/// every new phone and on no upgraded phone, and the failure is delayed and
-/// silent: the first INSERT that mentions it throws "no such column", the
-/// write is lost, and - before the try/catch that now guards both save paths -
-/// the Save button simply spun forever while the user was told nothing.
+/// 1. The outbox encoder emitted string values without quotes, so every queued
+///    row was invalid JSON and no collection taken on a phone ever reached the
+///    shop while the server looked perfectly healthy.
 ///
-/// This test reads the source and fails if the two drift apart again. It cannot
-/// run the real migration without a device, but drift is a source-level
-/// property, and this is the only place it can be caught for free.
-void main() {
-  final fixture = jsonDecode(
-    File('test/fixtures/outbox_payloads.json').readAsStringSync(),
-  ) as Map<String, dynamic>;
-
-/// Guards the bug that stopped the field app from ever uploading anything.
+/// 2. The local SQLite schema gained a column that was only added to the
+///    fresh-install path. _createSchema runs once, on first launch, so every
+///    ALREADY-INSTALLED phone threw "no such column" the moment a field user
+///    saved a record - the write was lost, and because nothing caught it the Save
+///    button simply spun forever.
 ///
-/// `Db` used to build outbox payloads with a hand-rolled string encoder that
-/// never quoted a string value, so `{"kind":collection}` was stored and
-/// `jsonDecode` then threw `FormatException: Unexpected character (at character
-/// 9)` on the very first field. The push aborted, the outbox never drained, and
-/// no collection taken on a phone ever reached the shop - while the server
-/// looked perfectly healthy, because it was.
+/// Neither needed a device to catch. The first is a property of the encoded
+/// bytes, the second a property of the source: which columns are written versus
+/// which the migration path adds.
 void main() {
   final fixture = jsonDecode(
     File('test/fixtures/outbox_payloads.json').readAsStringSync(),
