@@ -170,7 +170,10 @@ await check('the same document cannot be posted twice', async () => {
   // entry twice. Enforced by the database, not by remembering to check.
   const cash = await accId('1000');
   const sales = await accId('4000');
-  const sourceId = 987654;
+  // A fresh source id per run. The journal is append-only, so yesterday's entry
+  // for this document is still there and a fixed id would collide on the FIRST
+  // insert rather than the second - which is the test measuring the wrong thing.
+  const sourceId = 900000 + (Date.now() % 90000);
   const first = await postEntry('sale', sourceId, [
     { account: sales, credit: 250 },
     { account: cash, debit: 250 },
