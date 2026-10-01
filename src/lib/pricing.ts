@@ -24,10 +24,14 @@
 export type CustomerType = "walking" | "returning" | "wholesale";
 
 export interface PriceSource {
-  /** The customer's assigned list, if any. */
+  /** The list assigned to this customer directly. Individual beats group. */
   priceListId?: number | null;
-  /** The rows from price_list_items for that list. */
+  /** Rows from price_list_items for that list. */
   listItems?: { product_id: number; price: number | null; min_qty: number | null }[];
+  /** Rows from the CUSTOMER'S GROUP's list - the pricing priority layer. */
+  groupListItems?: { product_id: number; price: number | null; min_qty: number | null }[];
+  /** The tier the customer's group bills at, e.g. 'wholesale'. */
+  groupTier?: CustomerType | null;
   /** The rows from party_prices for this customer. */
   partyPrices?: Record<number, number>;
   /** The legacy per-product tier columns, for the fallback. */
@@ -42,7 +46,46 @@ export interface PriceSource {
 export interface ResolvedPrice {
   price: number;
   /** Which rule decided it - shown to the shopkeeper so a surprise is explainable. */
-  source: "party" | "list" | "tier" | "none";
+  source: "party" | "assigned_list" | "group_list" | "group_tier" | "tier" | "none";
+}
+
+/**
+ * Best price for a product from a list, honouring quantity breaks.
+ *
+ * The best match is the highest min_qty the quantity actually reaches. Falling
+ * back to the largest break that was NOT reached would price a single unit at
+ * the bulk rate, which is the classic way this rule gets implemented wrong.
+ */
+function bestFromList(
+  items: PriceSource["listItems"],
+  productId: number,
+  qty: number
+): number | null {
+  if (!items?.length) return null;
+  // min_qty is normalised to a number immediately, so the comparison is never
+  // against null even though the column is nullable.
+  let best: { price: number; minQty: number } | null = null;
+  for (const it of items) {
+    if (it.product_id !== productId) continue;
+    if (it.price === null || it.price === undefined) continue;
+    const minQty = it.min_qty === null || it.min_qty === undefined ? 0 : Number(it.min_qty);
+    if (qty < minQty) continue;
+    if (!best || minQty > best.minQty) best = { price: Number(it.price), minQty };
+  }
+  return best ? best.price : null;
+}
+
+/** The legacy three-tier rule, extracted so the group can reuse it. */
+function fromTiers(p: PriceSource["product"], tier: CustomerType, qty: number): number | null {
+  if (!p) return null;
+  if (tier === "walking") {
+    if (p.price_walking !== null && p.price_walking !== undefined) return Number(p.price_walking);
+  } else if (tier === "wholesale") {
+    const minQty = Number(p.wholesale_min_qty ?? 0);
+    if (p.price_wholesale && qty >= minQty) return Number(p.price_wholesale);
+  }
+  if (p.price_returning !== null && p.price_returning !== undefined) return Number(p.price_returning);
+  return null;
 }
 
 export function resolvePrice(
@@ -56,42 +99,28 @@ export function resolvePrice(
   const agreed = src.partyPrices?.[productId];
   if (agreed !== undefined && agreed !== null) return { price: Number(agreed), source: "party" };
 
-  // 2. The customer's price list, quantity break honoured.
-  //
-  //    The best match is the highest min_qty the quantity actually reaches, so
-  //    buying 12 of something priced "10 or more" gets the bulk price, and
-  //    buying 9 gets the list price. Falling back to the highest break that was
-  //    NOT reached would price a single unit at the bulk rate, which is the
-  //    classic way this rule gets implemented wrong.
-  if (src.listItems?.length) {
-    // min_qty is normalised to a number immediately, so the comparison below is
-    // never against null even though the column is nullable.
-    let best: { price: number; minQty: number } | null = null;
-    for (const it of src.listItems) {
-      if (it.product_id !== productId) continue;
-      if (it.price === null || it.price === undefined) continue;
-      const minQty = it.min_qty === null || it.min_qty === undefined ? 0 : Number(it.min_qty);
-      if (qty < minQty) continue;
-      if (!best || minQty > best.minQty) best = { price: Number(it.price), minQty };
-    }
-    if (best) return { price: best.price, source: "list" };
+  // 2. A list assigned to this customer directly. Individual beats group: a one
+  //    off arrangement is more personal than the group rule it sits inside.
+  const assigned = bestFromList(src.listItems, productId, qty);
+  if (assigned !== null) return { price: assigned, source: "assigned_list" };
+
+  // 3. The GROUP's list - "returning, wholesale or walking, as priority on top
+  //    of normal price". This is the layer the shopkeeper asked for.
+  const grouped = bestFromList(src.groupListItems, productId, qty);
+  if (grouped !== null) return { price: grouped, source: "group_list" };
+
+  // 4. The group's tier via the product's own tier columns, for a group with no
+  //    dedicated list - which is the common case, and keeps one price per
+  //    product instead of copying it into every group.
+  if (src.groupTier) {
+    const byGroup = fromTiers(src.product, src.groupTier, qty);
+    if (byGroup !== null) return { price: byGroup, source: "group_tier" };
   }
 
-  // 3. The three original tiers, exactly as pf() and getPrice() did them.
-  const p = src.product;
-  if (p) {
-    if (customerType === "walking") {
-      if (p.price_walking !== null && p.price_walking !== undefined) {
-        return { price: Number(p.price_walking), source: "tier" };
-      }
-    } else if (customerType === "wholesale") {
-      const minQty = Number(p.wholesale_min_qty ?? 0);
-      if (p.price_wholesale && qty >= minQty) return { price: Number(p.price_wholesale), source: "tier" };
-    }
-    if (p.price_returning !== null && p.price_returning !== undefined) {
-      return { price: Number(p.price_returning), source: "tier" };
-    }
-  }
+  // 5. The manual W / R / Wh switcher. Kept for walk-ins and one-off bills, and
+  //    as the fallback for a customer whose group is unset.
+  const bySwitch = fromTiers(src.product, customerType, qty);
+  if (bySwitch !== null) return { price: bySwitch, source: "tier" };
 
   return { price: 0, source: "none" };
 }

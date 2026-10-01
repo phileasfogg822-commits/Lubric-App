@@ -489,6 +489,9 @@ const SYNC_TABLES = {
   price_list_items: {},
   party_price_lists: {},
   party_prices: {},
+  // Customer groups (migration 031) decide the price tier, so they replicate for
+  // the same reason the price lists do.
+  customer_groups: {},
 };
 
 /** Resolve a device from its bearer token. Sets req.device or leaves null. */

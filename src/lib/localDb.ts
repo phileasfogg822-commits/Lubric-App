@@ -277,6 +277,30 @@ CREATE TABLE IF NOT EXISTS party_prices (
 CREATE INDEX IF NOT EXISTS idx_pp_party ON party_prices(party_type, party_id);
 `;
 
+// Part 7: customer groups (server/migrations/031_customer_groups.sql).
+//
+// usePriceContext() reads customer_groups on every customer selection, so a
+// missing local table does not degrade - it throws "no such table" and the POS
+// loses group pricing for that customer, silently falling back to normal price.
+export const LOCAL_SCHEMA_7 = `
+CREATE TABLE IF NOT EXISTS customer_groups (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid          TEXT UNIQUE,
+  shop_id       INTEGER DEFAULT 1,
+  name          TEXT NOT NULL,
+  code          TEXT,
+  price_tier    TEXT DEFAULT 'returning',
+  price_list_id INTEGER,
+  credit_days   INTEGER DEFAULT 0,
+  credit_limit  REAL DEFAULT 0,
+  colour        TEXT,
+  active        INTEGER DEFAULT 1,
+  created_at    TEXT DEFAULT (datetime('now')),
+  updated_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_groups_shop ON customer_groups(shop_id, active);
+`;
+
 /**
  * Columns the sync layer needs that this schema predates: 012_sync added uuid,
  * shop_id and updated_at to every replicated table, but an existing local
@@ -325,6 +349,13 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       await db.execute(LOCAL_SCHEMA_4);
       await db.execute(LOCAL_SCHEMA_5);
       await db.execute(LOCAL_SCHEMA_6);
+      // customers.group_id points at the group that decides the price, so it is
+      // added here too. Without the column the sync INSERT for a customer fails
+      // and takes the whole pull with it.
+      await db.execute(
+        "ALTER TABLE customers ADD COLUMN group_id INTEGER"
+      );
+      await db.execute(LOCAL_SCHEMA_7);
       await db.execute(LOCAL_SEED);
       // Columns first, then the index that depends on them.
       await patchSyncColumns(db);

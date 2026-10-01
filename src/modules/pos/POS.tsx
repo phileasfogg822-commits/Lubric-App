@@ -170,6 +170,42 @@ export default function POS() {
     // no capacity, so the memory shows litres rather than a bare price.
   }, [packMap]);
 
+  /**
+   * Credit standing for the bill currently in the cart.
+   *
+   * A WARNING, deliberately never a block. The database does not refuse the
+   * sale, and neither does the UI: whether to turn away a customer who is
+   * slightly over their limit is a judgement made by the person at the till,
+   * and it depends on things a constraint cannot see - they are the shop's best
+   * customer, they are paying cash, it is their birthday.
+   *
+   * The sign convention matters. customers.credit_balance is signed: positive
+   * means the customer OWES the shop, negative means the shop holds their money
+   * in advance. Adding the bill to a negative balance is the correct way to ask
+   * "would this put them over?", and getting the sign wrong would flag every
+   * customer with an advance as though they were heavily in debt.
+   */
+  const creditWarning = useMemo(() => {
+    const g = priceCtx.group;
+    const hist = customerHistory?.customer;
+    if (!g || g.credit_days <= 0 || !hist) return null;
+    const balance = Number(hist.credit_balance) || 0;
+    const total = cart.reduce((s, x) => s + (Number(x.line_total) || 0), 0);
+    const owed = Math.max(0, balance) + total;   // what they would owe after this
+    const limit = Number(g.credit_limit) || 0;
+
+    if (limit <= 0) {
+      return { over: false, text: `${currency(owed)} after this bill` };
+    }
+    const over = owed > limit;
+    return {
+      over,
+      text: over
+        ? `Over limit: ${currency(owed)} of ${currency(limit)}`
+        : `${currency(owed)} of ${currency(limit)}`,
+    };
+  }, [priceCtx.group, customerHistory, cart]);
+
   // Re-price the whole cart whenever the answer could have changed.
   //
   // The customer's price context arrives asynchronously, so picking a customer
@@ -671,6 +707,31 @@ export default function POS() {
                 <span style={{ color:"#16a34a" }}>Spent: {currency(customerHistory.totalSpent)}</span>
                 {customerHistory.customer.credit_balance > 0 && <span style={{ color:"#dc2626" }}>Credit: {currency(customerHistory.customer.credit_balance)}</span>}
                 <span style={{ color:"#64748b" }}>{customerHistory.bills} bill{customerHistory.bills === 1 ? "" : "s"}</span>
+                {/* The group is the pricing authority, so it is named here rather
+                    than left for the shopkeeper to infer from the price. It also
+                    carries the credit terms, which is why both live together. */}
+                {priceCtx.group && (
+                  <span
+                    style={{
+                      padding: "1px 6px", borderRadius: 3,
+                      background: "#e0e7ff", color: "#3730a3", fontWeight: 600,
+                    }}
+                    title={`Billed at the ${priceCtx.group.price_tier} price`}
+                  >
+                    {priceCtx.group.name}
+                  </span>
+                )}
+                {/* Credit terms, and whether THIS bill would breach the limit.
+                    Warned, never blocked: refusing a sale is a decision for the
+                    person at the till, not something to bury in a constraint. */}
+                {priceCtx.group && priceCtx.group.credit_days > 0 && (
+                  <span style={{ color:"#64748b" }}>Terms: {priceCtx.group.credit_days} days</span>
+                )}
+                {creditWarning && (
+                  <span style={{ color: creditWarning.over ? "#dc2626" : "#16a34a", fontWeight: 600 }}>
+                    {creditWarning.text}
+                  </span>
+                )}
                 {/* A walk-in who keeps coming back is not a walk-in. Offered
                     after the named threshold of repeat bills, and it changes
                     which list price applies from now on - so never automatic. */}

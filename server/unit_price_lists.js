@@ -70,7 +70,7 @@ await check('a list price beats the legacy columns', () => {
     listItems: [{ product_id: P, price: 4600, min_qty: null }],
   });
   eq(r.price, 4600, 'list price');
-  eq(r.source, 'list', 'source');
+  eq(r.source, 'assigned_list', 'source');
 });
 
 await check('an individually agreed price beats everything', () => {
@@ -158,6 +158,94 @@ await check('fractional quantities resolve against the break correctly', () => {
   };
   eq(resolvePrice(P, 'returning', 9.99, src).price, 4600, '9.99 litres');
   eq(resolvePrice(P, 'returning', 10, src).price, 4200, '10 litres');
+});
+
+// ── the group layer (migration 031) ────────────────────────────────────────
+// "the returning, wholesale or walkin, pricing should follow this as priority on
+// top of normal price" - so a group sits ABOVE the normal price and BELOW a
+// price agreed with one named customer.
+
+await check('a group beats the normal price', () => {
+  // Wholesale group, walking switcher. The group must win, or the W/R/Wh
+  // buttons still override the customer they were supposed to describe.
+  const r = resolvePrice(P, 'walking', 1, {
+    product: tierProduct,
+    groupTier: 'wholesale',
+  });
+  eq(r.price, 4800, 'group tier should bill returning, not walking');
+  eq(r.source, 'group_tier', 'source');
+});
+
+await check("a group's list beats the normal price and honours its breaks", () => {
+  const r = resolvePrice(P, 'walking', 12, {
+    product: tierProduct,
+    groupTier: 'wholesale',
+    groupListItems: [
+      { product_id: P, price: 4300, min_qty: null },
+      { product_id: P, price: 4000, min_qty: 10 },
+    ],
+  });
+  eq(r.price, 4000, 'twelve units should take the group bulk price');
+  eq(r.source, 'group_list', 'source');
+  eq(resolvePrice(P, 'walking', 3, {
+    product: tierProduct, groupTier: 'wholesale',
+    groupListItems: [{ product_id: P, price: 4300, min_qty: null }],
+  }).price, 4300, 'three units should take the group list price');
+});
+
+await check('an agreed price still beats the group', () => {
+  // The ladder must not be a flat "group wins". The most personal answer
+  // given is still the most personal.
+  const r = resolvePrice(P, 'walking', 1, {
+    product: tierProduct,
+    groupTier: 'wholesale',
+    groupListItems: [{ product_id: P, price: 4300, min_qty: null }],
+    partyPrices: { [P]: 3800 },
+  });
+  eq(r.price, 3800, 'agreed price');
+  eq(r.source, 'party', 'source');
+});
+
+await check('a directly assigned list beats the group list', () => {
+  // Individual beats group: a one-off arrangement is more personal than the
+  // group rule it sits inside.
+  const r = resolvePrice(P, 'wholesale', 1, {
+    product: tierProduct,
+    listItems: [{ product_id: P, price: 4100, min_qty: null }],
+    groupListItems: [{ product_id: P, price: 4300, min_qty: null }],
+    groupTier: 'wholesale',
+  });
+  eq(r.price, 4100, 'assigned list');
+  eq(r.source, 'assigned_list', 'source');
+});
+
+await check('a group with no list still prices by its tier', () => {
+  // The common case: a group that just means "bill them wholesale", reusing the
+  // product's own tier columns rather than copying prices into the group.
+  const r = resolvePrice(P, 'walking', 10, {
+    product: tierProduct,
+    groupTier: 'wholesale',
+  });
+  eq(r.price, 4500, 'ten units of wholesale');
+  eq(resolvePrice(P, 'walking', 2, { product: tierProduct, groupTier: 'wholesale' }).price,
+     4800, 'below the wholesale threshold it still falls back to returning');
+});
+
+await check('a group on a product it has no list entry for falls through cleanly', () => {
+  const r = resolvePrice(P, 'walking', 1, {
+    product: tierProduct,
+    groupTier: 'wholesale',
+    groupListItems: [{ product_id: 99, price: 1111, min_qty: null }],
+  });
+  eq(r.price, 4800, 'must not price from another product');
+  eq(r.source, 'group_tier', 'should fall through to the group tier');
+});
+
+await check('a customer with no group behaves exactly as before', () => {
+  // The whole change must be invisible to anyone not in a group.
+  const r = resolvePrice(P, 'returning', 1, { product: tierProduct });
+  eq(r.price, 4800, 'price');
+  eq(r.source, 'tier', 'source');
 });
 
 console.log('\n' + ok + '/' + total + ' checks passed');

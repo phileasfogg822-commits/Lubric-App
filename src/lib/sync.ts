@@ -30,6 +30,9 @@ export const SYNC_TABLES = [
   // from their own list while offline, instead of falling back to the tier
   // columns and quietly charging walk-in prices to a wholesale customer.
   "price_lists", "price_list_items", "party_price_lists", "party_prices",
+  // Customer groups (migration 031). The group decides the price tier, so an
+  // offline till that lacks it would bill a wholesale customer at retail.
+  "customer_groups",
 ] as const;
 
 const OUTBOX_SCHEMA = `
