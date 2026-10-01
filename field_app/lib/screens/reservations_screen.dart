@@ -177,17 +177,28 @@ class _ReservationFormState extends State<_ReservationForm> {
   Future<void> _save() async {
     final amount = double.tryParse(_amount.text.trim()) ?? 0;
     final desc = _items.text.trim().replaceAll(RegExp('["]'), "'");
-    await Db.i.saveReservation(Reservation(
-      uuid: newUuid(),
-      customerName: _customer.text.trim(),
-      // Stored as a one-item array so the shop renders it the same way as a
-      // multi-line reservation.
-      itemsJson: '[{"desc":"$desc"}]',
-      amount: amount,
-      status: ReservationStatus.open,
-      note: _note.text.trim(),
-      createdAt: DateTime.now(),
-    ));
+    try {
+      await Db.i.saveReservation(Reservation(
+        uuid: newUuid(),
+        customerName: _customer.text.trim(),
+        // Stored as a one-item array so the shop renders it the same way as a
+        // multi-line reservation.
+        itemsJson: '[{"desc":"$desc"}]',
+        amount: amount,
+        status: ReservationStatus.open,
+        note: _note.text.trim(),
+        createdAt: DateTime.now(),
+      ));
+    } catch (e) {
+      // Same rule as the Record screen: a failed write must say so, not close
+      // the sheet and leave the user believing it was saved.
+      if (!mounted) return;
+      final s = e.toString().replaceFirst(RegExp(r'^\w*Exception:\s*'), '');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Could not save: ${s.length > 140 ? '${s.substring(0, 140)}…' : s}'),
+      ));
+      return;
+    }
     if (mounted) Navigator.of(context).pop(true);
   }
 

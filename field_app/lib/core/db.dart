@@ -25,7 +25,7 @@ class Db {
       // Without an onUpgrade, an existing install keeps its old tables forever
       // and every query against a new column fails with "no such column", which
       // looks like a code bug rather than a migration that never ran.
-      version: 2,
+      version: 3,
       onCreate: (d, _) => _createSchema(d),
       onUpgrade: _upgrade,
     );
@@ -36,6 +36,14 @@ class Db {
   ///
   /// Written to be additive and safe to re-run, because a phone that fails to
   /// migrate is a phone that cannot upload its work.
+  ///
+  /// The rule this file exists to enforce: _createSchema only ever runs on a
+  /// FRESH install. A column added there and nowhere here is a column that
+  /// exists on every new phone and on no upgraded phone - and the failure is
+  /// silent and delayed, because the first INSERT that mentions it throws
+  /// "no such column" at the moment a field user saves a collection. That is
+  /// exactly how taken_by_name shipped in 0.6.2 and why the Save button spun
+  /// forever with nothing recorded.
   static Future<void> _upgrade(Database d, int from, int to) async {
     if (from < 2) {
       await d.execute('''CREATE TABLE IF NOT EXISTS sync_failures (
@@ -49,6 +57,26 @@ class Db {
       )''');
       await _rescueUnreadableOutbox(d);
     }
+    if (from < 3) {
+      // Columns added to _createSchema after v1. Every one of them belongs here.
+      await _addColumnIfMissing(d, 'cash_movements', 'taken_by_name', "TEXT DEFAULT ''");
+    }
+  }
+
+  /// SQLite has no `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, so look first.
+  ///
+  /// Silently skips a column that is already there, which keeps the migration
+  /// re-runnable and means a phone that somehow skipped a version still lands
+  /// on the right schema.
+  static Future<void> _addColumnIfMissing(
+    DatabaseExecutor d,
+    String table,
+    String column,
+    String decl,
+  ) async {
+    final cols = await d.rawQuery('PRAGMA table_info($table)');
+    if (cols.any((c) => c['name'] == column)) return;
+    await d.execute('ALTER TABLE $table ADD COLUMN $column $decl');
   }
 
   /// Rebuild outbox payloads that the old string encoder wrote as invalid JSON.

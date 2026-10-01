@@ -5,6 +5,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lubric_field/core/outbox_payload.dart';
 import 'package:lubric_field/models/models.dart';
 
+/// Guards a bug that shipped twice in the same week.
+///
+/// The local SQLite schema is created by `_createSchema`, which sqflite runs
+/// ONLY on a fresh install. A column added there and not to `_upgrade` exists on
+/// every new phone and on no upgraded phone, and the failure is delayed and
+/// silent: the first INSERT that mentions it throws "no such column", the
+/// write is lost, and - before the try/catch that now guards both save paths -
+/// the Save button simply spun forever while the user was told nothing.
+///
+/// This test reads the source and fails if the two drift apart again. It cannot
+/// run the real migration without a device, but drift is a source-level
+/// property, and this is the only place it can be caught for free.
+void main() {
+  final fixture = jsonDecode(
+    File('test/fixtures/outbox_payloads.json').readAsStringSync(),
+  ) as Map<String, dynamic>;
+
 /// Guards the bug that stopped the field app from ever uploading anything.
 ///
 /// `Db` used to build outbox payloads with a hand-rolled string encoder that
@@ -51,6 +68,111 @@ void main() {
         createdAt:
             DateTime.parse(row['created_at'] as String? ?? fallbackCreated),
       );
+
+  group('local schema cannot drift from the migration path', () {
+    final db = File('lib/core/db.dart').readAsStringSync();
+
+    /// Columns the CREATE TABLE block in _createSchema declares.
+    Set<String> columnsInCreateSchema(String table) {
+      final start = db.indexOf("CREATE TABLE $table (");
+      expect(start, isNot(-1), reason: 'could not find CREATE TABLE $table');
+      final end = db.indexOf('b.execute(', start);
+      final block = db.substring(start, end == -1 ? db.length : end);
+      return {
+        for (final m in RegExp(r'^\s*(\w+)\s+[A-Z]', multiLine: true)
+            .allMatches(block))
+          m.group(1)!,
+      };
+    }
+
+    /// Columns _upgrade patches via _addColumnIfMissing.
+    Set<String> columnsAddedByUpgrade() {
+      final start = db.indexOf('static Future<void> _upgrade');
+      final end = db.indexOf('/// SQLite has no', start);
+      final block = db.substring(start, end == -1 ? db.length : end);
+      return {
+        for (final m in RegExp(r"_addColumnIfMissing\(\s*d,\s*'\w+',\s*'(\w+)'")
+            .allMatches(block))
+          m.group(1)!,
+      };
+    }
+
+    test('the schema version is bumped past every migration step', () {
+      final version = int.parse(
+          RegExp(r'version:\s*(\d+)').firstMatch(db)!.group(1)!);
+      final steps = RegExp(r'if \(from < (\d+)\)')
+          .allMatches(db)
+          .map((m) => int.parse(m.group(1)!))
+          .toList();
+
+      expect(steps, isNotEmpty, reason: 'no migration steps found at all');
+      for (final s in steps) {
+        expect(s, lessThan(version),
+            reason: 'migration step "from < $s" can never run - the database '
+                'is already at version $version');
+      }
+      expect(steps.toSet().length, steps.length,
+          reason: 'two migration steps share the same version number');
+    });
+
+    test('every column saveMovement writes exists after an upgrade', () {
+      final start = db.indexOf('Future<void> saveMovement');
+      final end = db.indexOf('Future<List<CashMovement>> movements', start);
+      final body = db.substring(start, end);
+
+      final written = {
+        for (final m in RegExp(r"'(\w+)':").allMatches(body)) m.group(1)!,
+      };
+      expect(written, isNotEmpty, reason: 'could not read the insert columns');
+
+      final created = columnsInCreateSchema('cash_movements');
+      final added = columnsAddedByUpgrade();
+
+      for (final col in written) {
+        expect(
+          created.contains(col) || added.contains(col),
+          isTrue,
+          reason: 'saveMovement writes "$col", which is in neither the v1 '
+              'schema nor an _upgrade step. On every ALREADY-INSTALLED phone '
+              'that INSERT throws "no such column", the record is lost and the '
+              'user is shown nothing. Add it to _upgrade.',
+        );
+      }
+    });
+
+    test('every column saveReservation writes exists after an upgrade', () {
+      final start = db.indexOf('Future<void> saveReservation');
+      final end = db.indexOf('Future<List<Reservation>> reservations', start);
+      final body = db.substring(start, end);
+
+      final written = {
+        for (final m in RegExp(r"'(\w+)':").allMatches(body)) m.group(1)!,
+      };
+      final created = columnsInCreateSchema('reservations');
+      final added = columnsAddedByUpgrade();
+
+      for (final col in written) {
+        expect(created.contains(col) || added.contains(col), isTrue,
+            reason: 'saveReservation writes "$col", which no upgrade path adds');
+      }
+    });
+
+    test('both save paths report a failure instead of failing silently', () {
+      // The other half of the same incident: the write threw and nothing caught
+      // it, so the button spun forever. Both callers must wrap the save.
+      for (final screen in [
+        'lib/screens/record_screen.dart',
+        'lib/screens/reservations_screen.dart',
+      ]) {
+        final src = File(screen).readAsStringSync();
+        expect(src.contains('catch (e)'), isTrue,
+            reason: '$screen can still throw out of a save with nothing to '
+                'show the user');
+        expect(src.contains('Could not save'), isTrue,
+            reason: '$screen must tell the user the record was NOT saved');
+      }
+    });
+  });
 
   group('outbox payload is strict JSON', () {
     test('a collection round-trips through encode/decode unchanged', () {

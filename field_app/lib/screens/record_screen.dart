@@ -38,15 +38,26 @@ class _RecordScreenState extends State<RecordScreen> {
       return;
     }
     setState(() => _saving = true);
-    await Db.i.saveMovement(CashMovement(
-      uuid: newUuid(),
-      kind: _kind,
-      amount: amount,
-      customerUuid: _customer?.uuid ?? '',
-      customerName: _customer?.name ?? '',
-      note: _note.text.trim(),
-      occurredAt: _when,
-    ));
+    try {
+      await Db.i.saveMovement(CashMovement(
+        uuid: newUuid(),
+        kind: _kind,
+        amount: amount,
+        customerUuid: _customer?.uuid ?? '',
+        customerName: _customer?.name ?? '',
+        note: _note.text.trim(),
+        occurredAt: _when,
+      ));
+    } catch (e) {
+      // Never let a failed write look like a slow one. The old code let the
+      // exception escape across the async gap: the button stayed on "Saving…"
+      // forever, nothing was recorded, and the user was told nothing at all.
+      // A field user needs to know their collection was NOT saved.
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _toast('Could not save: ${_short(e)}');
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _saving = false;
@@ -56,6 +67,13 @@ class _RecordScreenState extends State<RecordScreen> {
       _when = DateTime.now();
     });
     _toast('${_kind.label} saved. It will sync automatically.');
+  }
+
+  /// The useful half of a database error. "no such column: taken_by_name" is
+  /// exactly what a field user needs to see, and exactly what they were not.
+  String _short(Object e) {
+    final s = e.toString().replaceFirst(RegExp(r'^\w*Exception:\s*'), '');
+    return s.length > 140 ? '${s.substring(0, 140)}…' : s;
   }
 
   void _toast(String m) {

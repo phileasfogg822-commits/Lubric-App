@@ -26,7 +26,12 @@ publish_to: "none"
 #   0.6.2+8  the shop asked to know WHO is in the field, not just which phone.
 #            More now asks the collector's name once and stamps it on every
 #            collection, so a shared handset no longer hides who took the money.
-version: 0.6.2+8
+#   0.6.3+9  THE SAVE BUG. 0.6.2 added a column to the local database but only
+#            to the fresh-install schema, so on every already-installed phone
+#            saving a record threw "no such column" - the record was lost and the
+#            Save button spun forever with nothing recorded. A real migration
+#            now adds the column, and a failed save says so instead of hanging.
+version: 0.6.3+9
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
