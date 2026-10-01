@@ -28,7 +28,7 @@ import {
   statementQuery,
 } from '../src/lib/ledgerSql.ts';
 
-const BASE = 'http://localhost:3001';
+const BASE = process.env.API_BASE || 'http://localhost:3001';
 
 // ── helpers (same shape as e2e_reminders.js) ──────────────────────────────────
 async function post(path, body, token) {
