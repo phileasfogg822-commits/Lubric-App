@@ -429,6 +429,10 @@ const SYNC_TABLES = {
   // pull scopes every table on (shop_id, updated_at). It joins the list in the
   // same migration that gives it a shop_id — listing it now would just log a
   // per-sync "column does not exist" error for every device.
+  // The stock ledger (migration 025) is append-only for the same reason as
+  // party_ledger: deleting a movement would change a stock balance the shop has
+  // already shown, so a mistake is corrected with a reversing row.
+  stock_movements: {},
 };
 
 /** Resolve a device from its bearer token. Sets req.device or leaves null. */

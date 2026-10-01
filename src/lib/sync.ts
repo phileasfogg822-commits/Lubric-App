@@ -22,6 +22,10 @@ export const SYNC_TABLES = [
   // The khata + road bookings (migration 014). Mirrors SYNC_TABLES in
   // server/index.js; commitment_items is still missing there (no shop_id).
   "party_ledger", "commitments",
+  // The stock ledger (migration 025). Pulled so the desktop can show why an
+  // item's stock is what it is, and reconcile products.stock_qty against
+  // SUM(qty) without needing the server.
+  "stock_movements",
 ] as const;
 
 const OUTBOX_SCHEMA = `

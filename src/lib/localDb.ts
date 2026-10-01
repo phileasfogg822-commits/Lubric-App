@@ -190,6 +190,36 @@ CREATE TABLE IF NOT EXISTS reservations (
 CREATE INDEX IF NOT EXISTS idx_reserv_status ON reservations(status);
 `;
 
+// Part 5: the stock ledger (server/migrations/025_stock_ledger.sql).
+//
+// The local table exists for the same reason order_items was widened: the sync
+// agent inserts every server column it is sent, so a missing column here does
+// not degrade - it throws "no such column" and takes the whole pull with it.
+//
+// The cache/ledger split is preserved locally too: products.stock_qty stays the
+// fast column, stock_movements is the append-only record behind it, and the two
+// can be reconciled the same way.
+export const LOCAL_SCHEMA_5 = `
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid               TEXT UNIQUE,
+  shop_id            INTEGER DEFAULT 1,
+  item_id            INTEGER NOT NULL,
+  kind               TEXT NOT NULL,
+  qty                REAL NOT NULL,
+  qty_after          REAL,
+  ref_table          TEXT,
+  ref_id             INTEGER,
+  warehouse_id       INTEGER,
+  note               TEXT DEFAULT '',
+  occurred_at        TEXT,
+  created_by_user_id INTEGER,
+  created_at         TEXT DEFAULT (datetime('now')),
+  updated_at         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_stock_item ON stock_movements(shop_id, item_id, occurred_at);
+`;
+
 /**
  * Columns the sync layer needs that this schema predates: 012_sync added uuid,
  * shop_id and updated_at to every replicated table, but an existing local
@@ -236,6 +266,7 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       await db.execute(LOCAL_SCHEMA_2);
       await db.execute(LOCAL_SCHEMA_3);
       await db.execute(LOCAL_SCHEMA_4);
+      await db.execute(LOCAL_SCHEMA_5);
       await db.execute(LOCAL_SEED);
       // Columns first, then the index that depends on them.
       await patchSyncColumns(db);

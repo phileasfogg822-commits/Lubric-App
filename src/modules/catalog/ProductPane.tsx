@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { dbSelect, dbExecute } from "../../lib/db";
+import { dbSelect, dbExecute, dbTransaction } from "../../lib/db";
+import { stockStatements } from "../../lib/stock";
+import { newUuid } from "../../lib/uuid";
 import { Modal } from "../../components/Modal";
 import { FormField } from "../../components/FormField";
 import { EmptyState } from "../../components/EmptyState";
@@ -77,13 +79,43 @@ export default function ProductPane({ view, density, columns, search, compact, o
         parseFloat(form.wholesale_min_qty || "10"),
       ];
       if (editId) {
-        await dbExecute(
-          `UPDATE products SET name=$1, category_id=$2, brand_id=$3, vendor_id=$4, variant=$5, packing=$6,
-             unit=$7, mfd_date=$8, exp_date=$9, received_date=$10, offer=$11, stock_qty=$12,
-             low_stock_threshold=$13, price_returning=$14, price_walking=$15, price_wholesale=$16,
-             wholesale_min_qty=$17 WHERE id=$18`,
-          [...values, editId]
-        );
+        // Stock is the ONE field on this form that is not a plain column
+        // write. Typing a new number here is a physical count, and a count that
+        // is not in the ledger is a balance nothing can explain - which is
+        // exactly how the real shop's stock drifted away from its own records.
+        //
+        // So the field set is updated as normal, and the DIFFERENCE is posted as
+        // a count_correction movement. Editing a price leaves stock untouched and
+        // writes no movement; correcting a count leaves a dated, attributed
+        // movement that says the books were changed to match the shelf.
+        const nextStock = parseFloat(form.stock_qty || "0");
+        const prev = await dbSelect<any>("SELECT stock_qty FROM products WHERE id = $1", [editId]);
+        const prevStock = prev.length ? Number(prev[0].stock_qty) || 0 : 0;
+        const delta = Math.round((nextStock - prevStock) * 1000) / 1000;
+
+        const stmts: { sql: string; params: unknown[] }[] = [{
+          sql: `UPDATE products SET name=$1, category_id=$2, brand_id=$3, vendor_id=$4, variant=$5, packing=$6,
+                  unit=$7, mfd_date=$8, exp_date=$9, received_date=$10, offer=$11,
+                  low_stock_threshold=$13, price_returning=$14, price_walking=$15, price_wholesale=$16,
+                  wholesale_min_qty=$17 WHERE id=$18`,
+          params: [values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7],
+                   values[8], values[9], values[10], values[12], values[13], values[14], values[15],
+                   values[16], editId],
+        }];
+        if (delta !== 0) {
+          stmts.push(
+            ...stockStatements({
+              itemId: editId,
+              kind: "count_correction",
+              qty: delta,
+              uuid: newUuid(),
+              refTable: "products",
+              refId: editId,
+              note: `Stock counted at ${nextStock}, books said ${prevStock}`,
+            })
+          );
+        }
+        await dbTransaction(stmts);
       } else {
         await dbExecute(
           `INSERT INTO products (name, category_id, brand_id, vendor_id, variant, packing, unit,

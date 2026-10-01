@@ -1,6 +1,9 @@
 import type { Product, CustomerType, CartItem } from "../../lib/types";
 import { dbGet, dbExecute, dbSelect, dbTransaction } from "../../lib/db";
 
+import { stockOut } from "../../lib/stock";
+import { newUuid } from "../../lib/uuid";
+
 export type { CartItem };
 
 /** Bottle size in litres, parsed from a product's packing label ("4L", "500ml", "4"). */
@@ -224,7 +227,14 @@ export async function completeSale(
       });
     }
     if (item.kind === "product") {
-      statements.push({ sql: "UPDATE products SET stock_qty = stock_qty - $1 WHERE id = $2", params: [item.qty, item.ref_id] });
+      // Through the ledger, not a bare UPDATE: a sale has to be explainable as
+      // "this much left the shelf for order #123", and rebuildable from history.
+      statements.push(
+        ...stockOut(item.ref_id, item.qty, "sale", newUuid(), {
+          table: "orders",
+          id: oid,
+        })
+      );
     }
     if (item.kind === "partial_container" && item.container_id) {
       statements.push({ sql: "UPDATE containers SET remaining_volume = remaining_volume - $1, status = CASE WHEN remaining_volume - $1 <= 0 THEN 'empty' ELSE 'opened' END WHERE id = $2", params: [item.qty, item.container_id] });

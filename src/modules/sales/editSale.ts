@@ -1,4 +1,6 @@
 import { dbSelect, dbTransaction } from "../../lib/db";
+import { stockIn, stockStatements } from "../../lib/stock";
+import { newUuid } from "../../lib/uuid";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -86,7 +88,20 @@ export async function saveOrderEdits(
   for (const n of lines) if (n.kind === "product") delta[n.ref_id] = (delta[n.ref_id] ?? 0) - n.qty;
   for (const [pid, d] of Object.entries(delta)) {
     if (!d) continue;
-    st.push({ sql: "UPDATE products SET stock_qty = stock_qty + $1 WHERE id = $2", params: [d, Number(pid)] });
+    // A signed adjustment through the ledger. The bill shrank, so stock goes
+    // back in (positive); it grew, so stock comes out (negative). Recorded as its
+    // own movement against this order so the history explains itself.
+    st.push(
+      ...stockStatements({
+        itemId: Number(pid),
+        kind: "adjustment",
+        qty: d,
+        uuid: newUuid(),
+        refTable: "orders",
+        refId: orderId,
+        note: `Bill #${orderId} edited`,
+      })
+    );
   }
 
   // 2 ─ Leftover containers: keep the shelf in step with the edited routing.
@@ -181,7 +196,13 @@ export async function voidOrder(orderId: number): Promise<void> {
 
   for (const it of items) {
     if (it.kind === "product") {
-      st.push({ sql: "UPDATE products SET stock_qty = stock_qty + $1 WHERE id = $2", params: [it.qty, it.ref_id] });
+      st.push(
+        ...stockIn(it.ref_id, it.qty, "sale_return", newUuid(), {
+          table: "orders",
+          id: orderId,
+          note: `Bill #${orderId} voided`,
+        })
+      );
       if (it.leftover_to === "container" && !it.leftover_released && it.leftover_litres > 0) {
         st.push(...drawDown(it.ref_id, it.leftover_litres, orderId));
       }
