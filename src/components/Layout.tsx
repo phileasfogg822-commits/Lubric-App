@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { isAdminRole } from "../lib/permissions";
 import { NotificationBell } from "./NotificationBell";
+import ShopSelector from "./ShopSelector";
 
 /**
  * Sidebar entries. `permission` matches a key in src/lib/permissions.ts and is
@@ -33,10 +34,11 @@ const NAV: { to: string; label: string; icon: string; permission?: string; anyOf
 ];
 
 export default function Layout() {
-  const { user, logout } = useAuth();
+  const { user, logout, outlets, activeShopId } = useAuth();
   const navigate = useNavigate();
   const admin = isAdminRole(user?.role);
   const perms: string[] = Array.isArray(user?.permissions) ? (user!.permissions as string[]) : [];
+  const activeOutlet = outlets.find((o) => o.shop_id === activeShopId) ?? null;
 
   /** Admin/owner see everything; everyone else needs the key on their list. */
   function visible(item: (typeof NAV)[number]) {
@@ -77,12 +79,17 @@ export default function Layout() {
         >
           <div>
             LUBRIC POS
+            {/* The active outlet's real name, not a hardcoded one: a fixed label
+                above data from whichever outlet is selected is how a shopkeeper
+                reads one outlet's takings while believing they are another's. */}
             <div style={{ fontSize: "0.7rem", fontWeight: 400, color: "#94a3b8", marginTop: 2 }}>
-              Zafar Lubricants
+              {activeOutlet?.name ?? "Lubricants"}
             </div>
           </div>
           <NotificationBell />
         </div>
+
+        <ShopSelector />
 
         <nav style={{ flex: 1, overflow: "auto", padding: "0.5rem 0" }}>
           {NAV.filter(visible).map((item) => (

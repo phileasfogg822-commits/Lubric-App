@@ -1,7 +1,11 @@
 import { readdir, readFile } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import pool from './db.js';
+// The ADMIN pool, not the app pool: migrations are DDL and backfill work that
+// must see every outlet. Once RLS is enabled (migration 030) the app pool runs
+// as a NOSUPERUSER role that row security WILL enforce - pointing the migration
+// runner at it would make it read zero rows and silently skip data work.
+import { adminPool as pool } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

@@ -40,6 +40,20 @@ services:
       DB_NAME: ${DB_NAME:-lubricapp}
       DB_USER: ${DB_USER:-lubric}
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      # Migrations run as the SUPERUSER (DB_ADMIN_USER, defaulting to DB_USER),
+      # because a superuser bypasses row security unconditionally and schema
+      # changes and backfills must see every outlet.
+      #
+      # The app connects as DB_APP_USER: a NOSUPERUSER NOBYPASSRLS role, which is
+      # the only kind of role Postgres will actually constrain. Its password must
+      # match the one created in server/migrations/029_multi_outlet.sql.
+      #
+      # Setting this does NOT enable isolation by itself - the policies still need
+      # ALTER TABLE ... ENABLE ROW LEVEL SECURITY (migration 030). Switching the
+      # role first, while enforcement is off, is deliberate: it proves the grants
+      # are complete before they start mattering.
+      DB_APP_USER: ${DB_APP_USER:-lubric_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:-lubric_app_pw}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
     volumes:
       # Published APK builds + android.json. To ship a new app version you

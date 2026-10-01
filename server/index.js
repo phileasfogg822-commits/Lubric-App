@@ -300,7 +300,20 @@ app.post('/api/auth/login', async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    res.json({ token, user });
+    // Every outlet this login may enter, so the app can render the selector
+    // without a second request. user_shops / shops are exempt from row security
+    // (you must be able to read your own memberships before any outlet is
+    // known), so this is deliberately unscoped.
+    const outlets = await query(
+      `SELECT us.shop_id, us.role, s.name, s.address, s.phone
+         FROM user_shops us
+         JOIN shops s ON s.id = us.shop_id
+        WHERE us.user_id = $1
+        ORDER BY us.shop_id`,
+      [user.id]
+    );
+
+    res.json({ token, user, shops: outlets.rows });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
@@ -322,6 +335,34 @@ app.get('/api/auth/me', async (req, res) => {
   }
 });
 
+// ─── Which outlet is this request for? ─────────────────────────────────────
+//
+// Every dbSelect / dbExecute / dbTransaction in the browser travels through
+// /api/query, /api/execute or /api/transaction. Scoping these three therefore
+// scopes all 118 of those call sites at once, without rewriting any of them -
+// the row policies do the filtering.
+//
+// The request may name its outlet in the X-Shop-Id header, because one login
+// now covers several. That header MUST be validated against user_shops: without
+// the check it would be an authorization bypass, not a scope, and any user
+// could read another outlet simply by naming it. An unrecognised value falls
+// back to the user's home outlet rather than being rejected outright, so a
+// stale header degrades to the safe default instead of breaking the screen.
+async function resolveShop(req) {
+  if (!req.user) return null;
+  const home = req.user.shop_id || null;
+  const raw = req.headers['x-shop-id'];
+  if (!raw) return home;
+  const want = parseInt(String(raw), 10);
+  if (!Number.isFinite(want)) return home;
+  if (want === home) return want;
+  const r = await query(
+    'SELECT shop_id FROM user_shops WHERE user_id = $1 AND shop_id = $2',
+    [req.user.id, want]
+  );
+  return r.rows.length ? want : home;
+}
+
 // ─── Generic Query Endpoint (for dbSelect) ──────────────────────
 app.post('/api/query', requirePermission((req) => req.body && req.body.sql), async (req, res) => {
   const { sql, params } = req.body;
@@ -336,7 +377,8 @@ app.post('/api/query', requirePermission((req) => req.body && req.body.sql), asy
   }
 
   try {
-    const result = await query(sql, params || []);
+    const shopId = await resolveShop(req);
+    const result = await query(sql, params || [], shopId);
     res.json(result.rows);
   } catch (err) {
     console.error('Query error:', err.message, 'SQL:', sql.substring(0, 100));
@@ -352,7 +394,8 @@ app.post('/api/execute', requirePermission((req) => req.body && req.body.sql), a
   }
 
   try {
-    const result = await query(sql, params || []);
+    const shopId = await resolveShop(req);
+    const result = await query(sql, params || [], shopId);
     if (/\busers\b/i.test(String(sql))) permCache.clear(); // access changed → drop cached permissions
     res.json({ rowCount: result.rowCount, rows: result.rows });
   } catch (err) {
@@ -375,6 +418,12 @@ app.post(
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      // The transaction endpoint runs its own BEGIN, so the shop context is set
+      // here rather than routed through withShop(): the setting is
+      // transaction-local, and BEGIN must come first or is_local has nothing to
+      // attach to and is discarded immediately.
+      await client.query("SELECT set_config('app.shop_id', $1, true)",
+        [String(await resolveShop(req) ?? '')]);
       const results = [];
       let touchedUsers = false;
       for (const stmt of statements) {
@@ -510,8 +559,12 @@ app.get('/api/v1/ping', async (req, res) => {
   try {
     const counts = {};
     for (const table of ['customers', 'cash_movements', 'reservations', 'party_ledger']) {
+      // shopId passed so row security applies once enabled. The device's outlet
+      // is already scoped in the SQL as well - belt and braces, because the SQL
+      // keeps working on the offline desktop replica while the header keeps
+      // working on the server.
       const r = await query(
-        `SELECT count(*)::int AS c FROM ${table} WHERE shop_id = $1`, [shopId]
+        `SELECT count(*)::int AS c FROM ${table} WHERE shop_id = $1`, [shopId], shopId
       );
       counts[table] = r.rows[0] ? r.rows[0].c : 0;
     }
@@ -642,7 +695,8 @@ app.get('/api/v1/pull', async (req, res) => {
       const params = [shopId, since.toISOString()];
       if (meta.softDelete) sqlText += ` AND (deleted_at IS NULL OR deleted_at > $2)`;
       sqlText += ` ORDER BY updated_at LIMIT 500`;
-      const r = await query(sqlText, params);
+      // shopId third arg sets the row-security context for the device's outlet.
+      const r = await query(sqlText, params, shopId);
       if (r.rows.length) changes[table] = r.rows;
     } catch (e) {
       console.error(`[sync] pull failed for "${table}":`, e.message);
@@ -734,6 +788,11 @@ app.post('/api/v1/push', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Scoped to the device's own outlet for the whole push. A device belongs to
+    // exactly one outlet (it is fixed at pairing), so this is the phone's outlet
+    // by construction and needs no header - but it MUST be set here or row
+    // security will hide the very rows the push is trying to write.
+    await client.query("SELECT set_config('app.shop_id', $1, true)", [String(shopId)]);
     for (const ch of changes.slice(0, 1000)) {
       const { table, uuid, op = 'insert', row } = ch || {};
       const meta = SYNC_TABLES[table];

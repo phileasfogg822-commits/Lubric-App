@@ -75,11 +75,44 @@ function apiBase(): string {
   } catch { return DEFAULT_API_BASE; }
 }
 
-/** The backend's permission guard requires a Bearer token on every call. */
+// ── active outlet ───────────────────────────────────────────────────────────
+// One login can reach several outlets now, so the browser must say which one it
+// is working in on every request. Sent as X-Shop-Id and validated server-side
+// against user_shops before it is trusted - see resolveShop() in server/index.js.
+//
+// Stored in localStorage, not memory, so a refresh does not silently drop you
+// back into the home outlet while cached totals still say otherwise. The
+// selector also stamps it on change, so the label and the data cannot drift.
+export const ACTIVE_SHOP_KEY = 'lubric_active_shop';
+
+export function activeShopId(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_SHOP_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setActiveShopId(id: number | string): void {
+  try {
+    localStorage.setItem(ACTIVE_SHOP_KEY, String(id));
+  } catch {
+    /* private mode - the server falls back to the home outlet */
+  }
+}
+
+/**
+ * The backend's permission guard requires a Bearer token on every call, and
+ * the outlet must ride along with it so row security can apply.
+ */
 function authHeaders(): Record<string, string> {
   try {
     const token = localStorage.getItem('lubric_token');
-    return token ? { Authorization: `Bearer ${token}` } : {};
+    const shop = localStorage.getItem(ACTIVE_SHOP_KEY);
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    if (shop) headers['X-Shop-Id'] = shop;
+    return headers;
   } catch {
     return {};
   }

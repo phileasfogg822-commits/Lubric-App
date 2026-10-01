@@ -1,5 +1,8 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { can, isAdminRole, parsePermissions } from "./permissions";
+// Aliased: the context exposes an `activeShopId` VALUE, and importing the
+// getter under the same name would shadow it inside the provider.
+import { setActiveShopId, activeShopId as readActiveShopId } from "./db";
 
 export interface User {
   id: number;
@@ -15,7 +18,17 @@ export interface User {
 
 const STORAGE_KEY = "lubric_user";
 const TOKEN_KEY = "lubric_token";
+const SHOPS_KEY = "lubric_shops";
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
+
+/** An outlet this login may enter. Returned by /api/auth/login. */
+export interface Outlet {
+  shop_id: number;
+  role: string | null;
+  name: string;
+  address: string | null;
+  phone: string | null;
+}
 
 interface AuthContextType {
   user: User | null;
@@ -27,6 +40,12 @@ interface AuthContextType {
   permissions: string[];
   /** True for admin/owner — they skip every permission check. */
   isAdmin: boolean;
+  /** Every outlet this login may enter. Empty until login resolves. */
+  outlets: Outlet[];
+  /** The outlet currently being worked in. Falls back to the user's home outlet. */
+  activeShopId: number | null;
+  /** Switch outlet. Persisted and sent as X-Shop-Id on every request. */
+  switchOutlet: (shopId: number) => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -42,6 +61,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   });
   const [loading, setLoading] = useState(false);
+
+  // Outlets this login may enter, and which one is active. Both persisted, so
+  // a refresh does not silently drop the shopkeeper back into their home outlet
+  // while every cached total on screen still says otherwise.
+  const [outlets, setOutlets] = useState<Outlet[]>(() => {
+    try {
+      const raw = localStorage.getItem(SHOPS_KEY);
+      return raw ? (JSON.parse(raw) as Outlet[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [activeShopId, setActive] = useState<number | null>(() => {
+    const stored = readActiveShopId();
+    if (stored && /^\d+$/.test(stored)) return Number(stored);
+    return null;
+  });
+
+  useEffect(() => {
+    try {
+      if (outlets.length) localStorage.setItem(SHOPS_KEY, JSON.stringify(outlets));
+      else localStorage.removeItem(SHOPS_KEY);
+    } catch { /* private mode */ }
+  }, [outlets]);
+
+  // The home outlet wins whenever nothing valid is stored, and the stored
+  // choice is dropped if it is not one the login may actually enter - so a
+  // revoked membership cannot linger in localStorage and keep sending a header
+  // the server will ignore anyway.
+  useEffect(() => {
+    if (!user) return;
+    const allowed = outlets.map((o) => o.shop_id);
+    if (!activeShopId || (allowed.length && !allowed.includes(activeShopId))) {
+      const home = user.shop_id ?? null;
+      setActive(home);
+      if (home) setActiveShopId(home);
+    }
+  }, [user, outlets, activeShopId]);
+
+  function switchOutlet(shopId: number) {
+    setActive(shopId);
+    setActiveShopId(shopId);
+  }
 
   // Persist to localStorage on change
   useEffect(() => {
@@ -66,6 +128,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data.user && data.token) {
         localStorage.setItem(TOKEN_KEY, data.token);
         setUser(data.user);
+        // The outlet list arrives with the login so the selector can render
+        // without a second round trip. Default to the home outlet; the effect
+        // above reconciles it if a previous session left another one stored.
+        const shops: Outlet[] = Array.isArray(data.shops) ? data.shops : [];
+        setOutlets(shops);
+        if (data.user.shop_id) {
+          setActive(data.user.shop_id);
+          setActiveShopId(data.user.shop_id);
+        }
         return true;
       }
       return false;
@@ -79,6 +150,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   function logout() {
     setUser(null);
+    // The outlet choice is cleared with the session: it is part of being
+    // signed in, and leaving it behind would let the next person in start in
+    // the previous person's outlet.
+    setOutlets([]);
+    setActive(null);
+    try {
+      localStorage.removeItem(SHOPS_KEY);
+      localStorage.removeItem("lubric_active_shop");
+    } catch { /* private mode */ }
   }
 
   /**
@@ -93,7 +173,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAdmin = isAdminRole(user?.role);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, hasPermission, permissions, isAdmin }}>
+    <AuthContext.Provider
+      value={{
+        user, loading, login, logout, hasPermission, permissions, isAdmin,
+        outlets, activeShopId, switchOutlet,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
