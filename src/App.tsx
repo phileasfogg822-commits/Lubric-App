@@ -9,6 +9,7 @@ import Login from "./modules/auth/Login";
 import Dashboard from "./modules/dashboard/Dashboard";
 import POS from "./modules/pos/POS";
 import SalesHistory from "./modules/sales/SalesHistory";
+import FieldActivity from "./modules/field/FieldActivity";
 import Catalog from "./modules/catalog/Catalog";
 import Customers from "./modules/customers/Customers";
 import Vendors from "./modules/vendors/Vendors";
@@ -79,6 +80,7 @@ export default function App() {
             <Route path="/reminders" element={<Reminders />} />
             <Route path="/pos" element={<RequirePermission permission="pos.create"><POS /></RequirePermission>} />
             <Route path="/sales" element={<RequirePermission permission="sales_history"><SalesHistory /></RequirePermission>} />
+        <Route path="/field" element={<RequirePermission permission="dashboard"><FieldActivity /></RequirePermission>} />
             <Route path="/catalog" element={<RequirePermission permission="catalog.manage"><Catalog /></RequirePermission>} />
             <Route path="/customers" element={<RequirePermission permission="customers"><Customers /></RequirePermission>} />
             <Route path="/vendors" element={<RequirePermission permission="vendors"><Vendors /></RequirePermission>} />

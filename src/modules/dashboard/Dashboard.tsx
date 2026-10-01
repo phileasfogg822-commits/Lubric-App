@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ResponsiveContainer, AreaChart, Area, LineChart, Line,
@@ -32,6 +33,7 @@ export default function Dashboard() {
   const qc = useQueryClient();
   const [showReminderModal, setShowReminderModal] = useState(false);
   const [reminderDraft, setReminderDraft] = useState<ReminderDraft | null>(null);
+  const navigate = useNavigate();
 
   const { data: todaySales } = useQuery({
     queryKey: ["today_sales"],
@@ -236,6 +238,22 @@ export default function Dashboard() {
     { label: "Low Stock", value: String(counts?.low_stock ?? 0), sub: "need restocking" },
   ];
 
+  // Money a collector is physically holding, straight from the phones. Added
+  // because the shop had no way to see field collections at all: the data was
+  // in the database and invisible, which looks exactly like a failed sync.
+  const fieldQ = useQuery({
+    queryKey: ["field_summary"],
+    queryFn: () =>
+      dbGet<{ collected: number; handed_over: number; rows: number }>(
+        `SELECT COALESCE(SUM(CASE WHEN kind = 'collection' THEN amount ELSE 0 END), 0) AS collected,
+                COALESCE(SUM(CASE WHEN kind = 'handover'   THEN amount ELSE 0 END), 0) AS handed_over,
+                COUNT(*) AS rows
+           FROM cash_movements
+          WHERE occurred_at >= now() - interval '7 days'`
+      ),
+  });
+  const fieldInHand = (fieldQ.data?.collected ?? 0) - (fieldQ.data?.handed_over ?? 0);
+
   return (
     <Page title="Dashboard" subtitle="Zafar Lubricants — Overview">
       {/* Stats */}
@@ -249,7 +267,35 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Notification centre */}
+      {/* Field activity from the phones */}
+{fieldQ.data && fieldQ.data.rows > 0 && (
+  <div
+    className="card"
+    style={{ marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}
+  >
+    <div>
+      <div style={{ fontWeight: 600 }}>📱 Field collections (7 days)</div>
+      <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: 2 }}>
+        {fieldQ.data.rows} record{fieldQ.data.rows === 1 ? "" : "s"} synced from phones ·{" "}
+        {currency(fieldQ.data.collected)} collected
+        {fieldQ.data.handed_over > 0 && ` · ${currency(fieldQ.data.handed_over)} handed over`}
+      </div>
+    </div>
+    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+      <div style={{ textAlign: "right" }}>
+        <div style={{ fontSize: "0.68rem", color: "#64748b", textTransform: "uppercase", letterSpacing: ".04em" }}>
+          In hand with phones
+        </div>
+        <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{currency(fieldInHand)}</div>
+      </div>
+      <button className="btn btn-ghost btn-sm" onClick={() => navigate("/field")}>
+        View all
+      </button>
+    </div>
+  </div>
+)}
+
+{/* Notification centre */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <div style={{ fontWeight: 600 }}>🔔 Notifications</div>

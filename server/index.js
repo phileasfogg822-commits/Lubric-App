@@ -660,6 +660,15 @@ app.post('/api/v1/push', async (req, res) => {
         vals.push(v);
       }
       if (!cols.includes('updated_at')) { cols.push('updated_at'); vals.push(new Date().toISOString()); }
+      // Stamp which phone sent this. The request is already authenticated as
+      // that device, so this cannot be spoofed by the row - it is the only
+      // reliable attribution, since the phone does not know its own id.
+      if (table === 'cash_movements' && valid.has('taken_by_device_id')) {
+        if (!cols.includes('taken_by_device_id')) {
+          cols.push('taken_by_device_id');
+          vals.push(req.device.id);
+        }
+      }
       const placeholders = cols.map((_, i) => `$${i + 1}`);
       const updateSet = cols
         .filter((c) => c !== 'uuid' && c !== 'shop_id')

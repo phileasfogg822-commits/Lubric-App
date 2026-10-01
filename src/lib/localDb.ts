@@ -137,6 +137,56 @@ export function pgToSqlite(sql: string): string {
     .replace(/\bFALSE\b/gi, "0");
 }
 
+// Part 4: field data (server/migrations/019_field_activity.sql).
+//
+// `cash_movements` and `reservations` are in the desktop sync agent's table
+// list, but this schema never created them - so pulling field data in local
+// (offline) mode failed with "no such table" before it could store a single
+// row. Mirrors the server columns, uuid UNIQUE because the pull upserts on it.
+//
+// customer_name is here because the field app records WHO was collected from
+// and the server previously had nowhere to put it.
+export const LOCAL_SCHEMA_4 = `
+CREATE TABLE IF NOT EXISTS cash_movements (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid               TEXT UNIQUE,
+  shop_id            INTEGER DEFAULT 1,
+  kind               TEXT NOT NULL,
+  amount             REAL DEFAULT 0,
+  customer_id        INTEGER,
+  customer_name      TEXT,
+  vendor_id          INTEGER,
+  order_id           INTEGER,
+  account_id         INTEGER,
+  taken_by_user_id   INTEGER,
+  taken_by_device_id INTEGER,
+  note               TEXT DEFAULT '',
+  occurred_at        TEXT,
+  origin             TEXT DEFAULT 'shop',
+  created_at         TEXT DEFAULT (datetime('now')),
+  updated_at         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cashmov_occurred ON cash_movements(occurred_at DESC);
+
+CREATE TABLE IF NOT EXISTS reservations (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid                TEXT UNIQUE,
+  shop_id             INTEGER DEFAULT 1,
+  customer_id         INTEGER,
+  customer_name       TEXT,
+  items_json          TEXT DEFAULT '[]',
+  amount              REAL DEFAULT 0,
+  status              TEXT DEFAULT 'open',
+  fulfilled_order_id  INTEGER,
+  created_by_user_id  INTEGER,
+  note                TEXT DEFAULT '',
+  origin              TEXT DEFAULT 'shop',
+  created_at          TEXT DEFAULT (datetime('now')),
+  updated_at          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_reserv_status ON reservations(status);
+`;
+
 /**
  * Columns the sync layer needs that this schema predates: 012_sync added uuid,
  * shop_id and updated_at to every replicated table, but an existing local
@@ -169,6 +219,7 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       await db.execute(LOCAL_SCHEMA);
       await db.execute(LOCAL_SCHEMA_2);
       await db.execute(LOCAL_SCHEMA_3);
+      await db.execute(LOCAL_SCHEMA_4);
       await db.execute(LOCAL_SEED);
       // Columns first, then the index that depends on them.
       await patchSyncColumns(db);

@@ -14,6 +14,10 @@ const NAV: { to: string; label: string; icon: string; permission?: string; anyOf
   { to: "/reminders", label: "Reminders", icon: "\u23F0", permission: "dashboard" },
   { to: "/pos", label: "New Sale", icon: "\u{1F9FE}", permission: "pos.create" },
   { to: "/sales", label: "Transactions", icon: "\u{1F4DC}", permission: "sales_history" },
+  // Field money (collections a phone has taken and not yet handed over) used to
+  // have no screen anywhere in the shop. Anyone who can see the dashboard needs
+  // to see it, or a collector holding cash is invisible.
+  { to: "/field", label: "Field Activity", icon: "\u{1F4F1}", permission: "dashboard" },
   { to: "/reports", label: "Reports", icon: "\u{1F4C8}", permission: "reports" },
   { to: "/profit", label: "Profit & Loss", icon: "\u{1F4B0}", permission: "profit_loss" },
   { to: "/catalog", label: "Catalog", icon: "\u{1F4E6}", permission: "catalog.manage" },
