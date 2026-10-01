@@ -22,7 +22,11 @@ publish_to: "none"
 #            already stuck are rebuilt from the local table on upgrade.
 #            Updates also carry REQUEST_INSTALL_PACKAGES, without which
 #            Android silently refused to install the downloaded APK.
-version: 0.6.1+7
+#            Android silently refused to install the downloaded APK.
+#   0.6.2+8  the shop asked to know WHO is in the field, not just which phone.
+#            More now asks the collector's name once and stamps it on every
+#            collection, so a shared handset no longer hides who took the money.
+version: 0.6.2+8
 
 environment:
   sdk: ">=3.3.0 <4.0.0"

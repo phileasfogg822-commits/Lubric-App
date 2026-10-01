@@ -5,6 +5,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/models.dart';
 import 'outbox_payload.dart';
+import 'settings.dart';
 
 /// Offline-first store. Every write lands here first and is queued in
 /// `outbox`; the server is just a replica. Nothing in this file needs a
@@ -124,6 +125,7 @@ class Db {
         amount        REAL NOT NULL DEFAULT 0,
         customer_uuid TEXT DEFAULT '',
         customer_name TEXT DEFAULT '',
+        taken_by_name TEXT DEFAULT '',
         note          TEXT DEFAULT '',
         occurred_at   TEXT NOT NULL,
         synced        INTEGER NOT NULL DEFAULT 0
@@ -198,6 +200,10 @@ class Db {
   /// Save a movement and queue it for the server in one transaction, so a row
   /// can never exist locally without also being queued for upload.
   Future<void> saveMovement(CashMovement m) async {
+    // Who is holding the phone right now is a fact about this record, so it is
+    // written to the row itself rather than read at sync time - a payment taken
+    // by one collector must still say so after the phone changes hands.
+    final taker = settings.collectorName;
     await _db.transaction((txn) async {
       await txn.insert(
         'cash_movements',
@@ -207,13 +213,15 @@ class Db {
           'amount': m.amount,
           'customer_uuid': m.customerUuid,
           'customer_name': m.customerName,
+          'taken_by_name': taker,
           'note': m.note,
           'occurred_at': m.occurredAt.toIso8601String(),
           'synced': 0,
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
-      await _enqueue(txn, 'cash_movements', m.uuid, OutboxPayload.movement(m));
+      await _enqueue(
+          txn, 'cash_movements', m.uuid, OutboxPayload.movement(m, takenByName: taker));
     });
   }
 

@@ -11,12 +11,12 @@ import EditButton from "./EditButton";
 import { useAuth } from "../../lib/auth";
 import { PERMISSIONS } from "../../lib/permissions";
 
-type Kind = "all" | "sale" | "purchase" | "expense";
+type Kind = "all" | "sale" | "purchase" | "expense" | "field";
 type Party = "all" | "walking" | "returning" | "wholesale" | "vendor";
 
 interface Txn {
   key: string;
-  kind: "sale" | "purchase" | "expense";
+  kind: "sale" | "purchase" | "expense" | "field";
   id: number;
   at: string;
   day: string;
@@ -27,12 +27,21 @@ interface Txn {
   amount: number;
   paid: number;
   status: string;
+  /** For field rows: the person holding the phone, and the phone itself. */
+  taker?: string;
+  phone?: string;
+  /** "collected" or "handed over" - which way the field money moved. */
+  fieldKind?: string;
 }
 
 const KIND_STYLE: Record<Txn["kind"], { bg: string; fg: string; label: string }> = {
   sale: { bg: "#dcfce7", fg: "#166534", label: "Sale" },
   purchase: { bg: "#dbeafe", fg: "#1e40af", label: "Purchase" },
   expense: { bg: "#fee2e2", fg: "#991b1b", label: "Expense" },
+  // Purple, deliberately unlike the counter Sale green: a collection taken in
+  // the field is a different kind of event and should be scannable at a glance
+  // rather than read as another counter sale.
+  field: { bg: "#ede9fe", fg: "#5b21b6", label: "Field" },
 };
 
 const PARTY_OPTIONS: { value: Party; label: string }[] = [
@@ -133,6 +142,31 @@ export default function SalesHistory() {
     },
   });
 
+  // Collections taken on the shop's phones. Part of the same ledger as counter
+  // sales: it is the same money, collected at the customer's doorstep instead
+  // of over the counter, and leaving it out made the shop's own history
+  // incomplete.
+  const { data: fieldRows } = useQuery({
+    queryKey: ["txn-field", from, to],
+    retry: false,
+    queryFn: () => {
+      const p: unknown[] = [];
+      let w = "WHERE 1=1";
+      if (from) { p.push(from); w += ` AND date(m.occurred_at) >= date($${p.length})`; }
+      if (to) { p.push(to); w += ` AND date(m.occurred_at) <= date($${p.length})`; }
+      return dbSelect<any>(
+        `SELECT m.id, m.kind, m.amount, m.occurred_at, m.customer_name,
+                m.taken_by_name, m.note, dv.name AS device_name
+           FROM cash_movements m
+           LEFT JOIN devices dv ON dv.id = m.taken_by_device_id
+           ${w}
+           ORDER BY m.occurred_at DESC, m.id DESC
+           LIMIT 500`,
+        p
+      );
+    },
+  });
+
   /** One flat ledger: sales money in, purchases and expenses money out. */
   const all = useMemo<Txn[]>(() => {
     const rows: Txn[] = [];
@@ -191,8 +225,28 @@ export default function SalesHistory() {
       });
     }
 
+    for (const m of fieldRows ?? []) {
+      rows.push({
+        key: `field-${m.id}`,
+        kind: "field",
+        id: m.id,
+        at: stamp(m.occurred_at),
+        day: dayOf(m.occurred_at),
+        party: m.customer_name || "Field collection",
+        partyType: "field",
+        vehicle: "",
+        items: 0,
+        amount: Number(m.amount ?? 0),
+        paid: Number(m.amount ?? 0),
+        status: m.kind === "collection" ? "collected" : m.kind,
+        taker: m.taken_by_name || "",
+        phone: m.device_name || "",
+        fieldKind: m.kind ?? "",
+      });
+    }
+
     return rows.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
-  }, [sales, purchases, expenseRows]);
+  }, [sales, purchases, expenseRows, fieldRows]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -215,6 +269,15 @@ export default function SalesHistory() {
       if (r.kind === "sale") {
         billed += r.amount;
         collected += r.paid;
+      } else if (r.kind === "field") {
+        // A field collection is money IN - the same shop's money, taken at the
+        // customer's door. Without this branch it fell into the "money out"
+        // else and a day of collecting showed as a loss.
+        //
+        // A handover is deliberately NOT added: it is that same cash arriving
+        // at the till, already counted when it was collected. Counting it here
+        // would double the day's receipts.
+        if (r.fieldKind === "collection") collected += r.amount;
       } else {
         out += r.amount;
       }
@@ -226,7 +289,7 @@ export default function SalesHistory() {
 
   const EXPORT_HEADERS = [
     "Date", "Type", "Ref", "Party", "Party type", "Vehicle",
-    "Items", "Amount", "Paid", "Remaining", "Status",
+    "Items", "Amount", "Paid", "Remaining", "Status", "Taken by", "Phone",
   ];
 
   function exportRows() {
@@ -242,6 +305,8 @@ export default function SalesHistory() {
       r.paid,
       r.kind === "sale" ? r.amount - r.paid : "",
       r.status,
+      r.taker || "",
+      r.phone || "",
     ]);
   }
 
@@ -256,7 +321,7 @@ export default function SalesHistory() {
   return (
     <Page
       title="Transaction History"
-      subtitle="Sales, vendor purchases and expenses in one searchable ledger"
+      subtitle="Counter sales, field collections, vendor purchases and expenses in one searchable ledger"
       action={
         <div style={{ display: "flex", gap: 8 }}>
           {/* PDF first — it renders the sheet below and opens the print dialog. */}
@@ -361,6 +426,28 @@ export default function SalesHistory() {
                         <span style={{ marginLeft: 6, fontSize: "0.68rem", color: "#94a3b8", textTransform: "capitalize" }}>
                           {r.partyType}
                         </span>
+                      )}
+                      {/* Field rows carry their provenance: what happened, who did
+                          it, and on which phone. "Which phone" comes from the
+                          authenticated device, "who" from what the collector
+                          typed - different questions when a phone is shared. */}
+                      {r.kind === "field" && (
+                        <div style={{ marginTop: 3, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                          <span style={{ fontSize: "0.66rem", padding: "1px 6px", borderRadius: 4, background: "#ede9fe", color: "#5b21b6", fontWeight: 600 }}>
+                            {r.fieldKind === "collection" ? "Received in field" : "Handed over in field"}
+                          </span>
+                          {r.taker && (
+                            <span style={{ fontSize: "0.68rem", color: "#475569" }}>by {r.taker}</span>
+                          )}
+                          {r.phone && (
+                            <span style={{ fontSize: "0.68rem", color: "#94a3b8" }}>on {r.phone}</span>
+                          )}
+                          {!r.taker && (
+                            <span style={{ fontSize: "0.68rem", color: "#b45309" }}>
+                              collector not recorded
+                            </span>
+                          )}
+                        </div>
                       )}
                     </td>
                     <td style={{ fontSize: "0.8rem", color: "#64748b" }}>{r.vehicle || "—"}</td>

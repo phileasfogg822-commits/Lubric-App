@@ -29,6 +29,7 @@ interface Movement {
   note: string | null;
   occurred_at: string;
   origin: string | null;
+  taken_by_name: string | null;
   device_name: string | null;
 }
 
@@ -71,7 +72,8 @@ export default function FieldActivity() {
     queryKey: ["field_movements", range],
     queryFn: () =>
       dbSelect<Movement>(`SELECT m.id, m.uuid, m.kind, m.amount, m.customer_name,
-              m.note, m.occurred_at, m.origin, dv.name AS device_name
+              m.note, m.occurred_at, m.origin, m.taken_by_name,
+              dv.name AS device_name
          FROM cash_movements m
          LEFT JOIN devices dv ON dv.id = m.taken_by_device_id
         WHERE ${active.where}
@@ -115,12 +117,13 @@ export default function FieldActivity() {
   function exportCsv() {
     downloadCSV(
       `field-collections-${range}.csv`,
-      ["When", "Kind", "Amount", "Customer", "Phone", "Note"],
+      ["When", "Kind", "Amount", "Customer", "Collector", "Phone", "Note"],
       rows.map((m) => [
         m.occurred_at,
         KIND_LABEL[m.kind] ?? m.kind,
         String(m.amount),
         m.customer_name ?? "",
+        m.taken_by_name || (m.device_name ?? ""),
         m.device_name ?? "",
         m.note ?? "",
       ]),
@@ -185,6 +188,7 @@ export default function FieldActivity() {
                 <th>When</th>
                 <th>Kind</th>
                 <th>Customer</th>
+                <th>Collector</th>
                 <th>Phone</th>
                 <th>Note</th>
                 <th style={{ textAlign: "right" }}>Amount</th>
@@ -209,7 +213,16 @@ export default function FieldActivity() {
                   </td>
                   <td>{m.customer_name || <span style={{ color: "#94a3b8" }}>—</span>}</td>
                   <td style={{ fontSize: "0.8rem", color: "#64748b" }}>
-                    {m.device_name || (m.origin === "mobile" ? "Phone" : "—")}
+                    {m.taken_by_name ? (
+                      <span style={{ fontWeight: 600, color: "#475569" }}>
+                        {m.taken_by_name}
+                      </span>
+                    ) : (
+                      <span style={{ color: "#b45309" }}>collector not recorded</span>
+                    )}
+                    {m.device_name && (
+                      <span style={{ color: "#94a3b8" }}> · {m.device_name}</span>
+                    )}
                   </td>
                   <td style={{ fontSize: "0.8rem", color: "#64748b" }}>{m.note || ""}</td>
                   <td

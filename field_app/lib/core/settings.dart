@@ -11,6 +11,7 @@ class Settings {
   static const _kDeviceName = 'lf_device_name';
   static const _kLastSync = 'lf_last_sync';
   static const _kLastError = 'lf_last_error';
+  static const _kCollector = 'lf_collector_name';
 
   SharedPreferences? _p;
 
@@ -45,6 +46,19 @@ class Settings {
 
   Future<void> setDeviceName(String value) async =>
       _p?.setString(_kDeviceName, value);
+
+  /// Who is using this phone, in their own words.
+  ///
+  /// The device token tells the shop which phone took a payment, not which
+  /// person was holding it - and those are different questions the moment a
+  /// phone is shared or swapped. Typed once here and stamped onto every record,
+  /// so collections can be traced to a person rather than a handset. Optional:
+  /// the shop falls back to the device name when this is blank.
+  String get collectorName =>
+      (_p?.getString(_kCollector) ?? '').trim();
+
+  Future<void> setCollectorName(String value) async =>
+      _p?.setString(_kCollector, value.trim());
 
   Future<void> setLastSync(DateTime when) async =>
       _p?.setString(_kLastSync, when.toIso8601String());

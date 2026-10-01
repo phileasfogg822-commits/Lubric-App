@@ -37,12 +37,21 @@ class OutboxPayload {
   /// picker existed; the shop matches on the uuid and falls back to the name.
   /// Sending both is why a collection now lands on the right customer's Khata
   /// instead of being an anonymous row in a silo.
-  static Map<String, dynamic> movement(CashMovement m) => <String, dynamic>{
+  ///
+  /// `taken_by_name` is the person holding the phone. The device token only
+  /// identifies the handset, so without this the shop cannot tell one collector
+  /// from another on a shared phone.
+  static Map<String, dynamic> movement(
+    CashMovement m, {
+    String takenByName = '',
+  }) =>
+      <String, dynamic>{
         'uuid': m.uuid,
         'kind': m.kind.name,
         'amount': m.amount,
         'customer_uuid': m.customerUuid,
         'customer_name': m.customerName,
+        'taken_by_name': takenByName,
         'note': m.note,
         'occurred_at': m.occurredAt.toUtc().toIso8601String(),
         'origin': mobileOrigin,
@@ -107,6 +116,7 @@ class OutboxPayload {
           'amount': number('amount'),
           'customer_uuid': text('customer_uuid'),
           'customer_name': text('customer_name'),
+          'taken_by_name': text('taken_by_name'),
           'note': text('note'),
           'occurred_at': utc('occurred_at', DateTime.now()),
           'origin': mobileOrigin,

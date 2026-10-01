@@ -13,7 +13,7 @@ export interface PrintData {
   totals?: [string, string][];
 }
 
-type Tab = "summary" | "statement" | "compare" | "export";
+type Tab = "summary" | "statement" | "compare" | "field" | "export";
 
 export default function Reports() {
   const [tab, setTab] = useState<Tab>("summary");
@@ -40,7 +40,7 @@ export default function Reports() {
       }
     >
       <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "1px solid #e2e8f0" }}>
-        {([["summary", "Summary"], ["statement", "Statements"], ["compare", "Comparison"], ["export", "Export Data"]] as [Tab, string][]).map(([t, label]) => (
+        {([["summary", "Summary"], ["statement", "Statements"], ["compare", "Comparison"], ["field", "Field Activity"], ["export", "Export Data"]] as [Tab, string][]).map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: "8px 14px", fontSize: "0.85rem", border: "none", background: "none", cursor: "pointer",
             borderBottom: tab === t ? "2px solid var(--color-primary)" : "2px solid transparent",
@@ -52,6 +52,7 @@ export default function Reports() {
       {tab === "summary" && <SummaryTab shop={shop?.[0]} onPrint={setPrintData} />}
       {tab === "statement" && <StatementTab shop={shop?.[0]} onPrint={setPrintData} />}
       {tab === "compare" && <CompareTab shop={shop?.[0]} onPrint={setPrintData} />}
+      {tab === "field" && <FieldTab shop={shop?.[0]} onPrint={setPrintData} />}
       {tab === "export" && <ExportTab />}
 
       {/* Print-only statement sheet — the only visible thing when printing.
@@ -508,6 +509,210 @@ function CompareTab({ shop, onPrint }: { shop?: any; onPrint: (p: PrintData) => 
 
 
 // ── Export tab ───────────────────────────────────────────────────────────────
+
+// ── Field activity tab ───────────────────────────────────────────────────────
+
+/**
+ * What the shop's phones actually collected, and who took it.
+ *
+ * Broken down two ways on purpose: by PERSON, which is the question a shop
+ * owner actually asks ("how much did Ali collect this month"), and by PHONE,
+ * which is the question you ask when a handset is shared or swapped and the two
+ * stop agreeing.
+ *
+ * A handover is listed but never added to the totals. It is the same cash
+ * arriving at the till, already counted when it was collected - counting it
+ * again would inflate every figure on this page.
+ */
+function FieldTab({ shop, onPrint }: { shop?: any; onPrint: (p: PrintData) => void }) {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+
+  /** One place builds the WHERE clause, so the on-screen view and the exported
+   *  CSV can never quietly report different periods. */
+  function range() {
+    const p: unknown[] = [];
+    let w = "WHERE 1=1";
+    if (from) { p.push(from); w += ` AND date(m.occurred_at) >= date($${p.length})`; }
+    if (to) { p.push(to); w += ` AND date(m.occurred_at) <= date($${p.length})`; }
+    return { p, w };
+  }
+
+  async function run() {
+    const { p, w } = range();
+    const totals = await dbSelect<any>(
+      `SELECT COALESCE(SUM(CASE WHEN m.kind = 'collection' THEN m.amount ELSE 0 END), 0) AS collected,
+              COALESCE(SUM(CASE WHEN m.kind = 'handover'   THEN m.amount ELSE 0 END), 0) AS handed_over,
+              COUNT(*) FILTER (WHERE m.kind = 'collection') AS collections
+         FROM cash_movements m ${w}`, p);
+    const detail = await dbSelect<any>(
+      `SELECT m.id, m.kind, m.amount, m.customer_name, m.taken_by_name, m.occurred_at,
+              m.note, dv.name AS device_name
+         FROM cash_movements m
+         LEFT JOIN devices dv ON dv.id = m.taken_by_device_id
+         ${w}
+        ORDER BY m.occurred_at DESC
+        LIMIT 500`, p);
+
+    const t = totals[0] || {};
+    const exported = detail.map((m: any) => [
+      String(m.occurred_at ?? "").slice(0, 16).replace("T", " "),
+      m.kind, m.taken_by_name || "", m.device_name || "",
+      m.customer_name || "", Number(m.amount ?? 0), m.note || "",
+    ]);
+    onPrint({
+      title: "Field Activity Report",
+      subtitle: `${shop?.name ?? "Shop"} — ${from || "start"} to ${to || "today"}`,
+      meta: [shop?.address ?? "", shop?.phone ?? ""].filter(Boolean),
+      headers: ["When", "Type", "Collector", "Phone", "Customer", "Amount", "Note"],
+      rows: exported,
+      totals: [
+        ["Collected (field)", currency(Number(t.collected ?? 0))],
+        ["Handed over", currency(Number(t.handed_over ?? 0))],
+        ["Still with phones", currency(Number(t.collected ?? 0) - Number(t.handed_over ?? 0))],
+        ["Collections", String(t.collections ?? 0)],
+      ],
+    });
+    downloadCSV(`field-activity-${from || "all"}-${to || "all"}.csv`,
+      ["When", "Type", "Collector", "Phone", "Customer", "Amount", "Note"], exported);
+  }
+
+  const { data } = useQuery({
+    queryKey: ["report_field", from, to],
+    queryFn: async () => {
+      const { p, w } = range();
+      const totals = await dbSelect<any>(
+        `SELECT COALESCE(SUM(CASE WHEN m.kind = 'collection' THEN m.amount ELSE 0 END), 0) AS collected,
+                COALESCE(SUM(CASE WHEN m.kind = 'handover'   THEN m.amount ELSE 0 END), 0) AS handed_over,
+                COUNT(*) FILTER (WHERE m.kind = 'collection') AS collections
+           FROM cash_movements m ${w}`, p);
+      const byPerson = await dbSelect<any>(
+        `SELECT COALESCE(NULLIF(m.taken_by_name, ''), dv.name, 'Unassigned') AS person,
+                dv.name AS phone,
+                COUNT(*) FILTER (WHERE m.kind = 'collection') AS collections,
+                COALESCE(SUM(CASE WHEN m.kind = 'collection' THEN m.amount ELSE 0 END), 0) AS collected,
+                COALESCE(SUM(CASE WHEN m.kind = 'handover'   THEN m.amount ELSE 0 END), 0) AS handed_over,
+                MAX(m.occurred_at) AS last_at
+           FROM cash_movements m
+           LEFT JOIN devices dv ON dv.id = m.taken_by_device_id
+           ${w}
+          GROUP BY 1, 2
+          ORDER BY collected DESC`, p);
+      return { totals: totals[0] ?? {}, byPerson };
+    },
+  });
+
+  const t = data?.totals ?? {};
+  const collected = Number(t.collected ?? 0);
+  const handedOver = Number(t.handed_over ?? 0);
+
+  return (
+    <div>
+      <DateInputs from={from} to={to} onFrom={setFrom} onTo={setTo} />
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, marginTop: 10, flexWrap: "wrap" }}>
+        <button className="btn btn-primary" onClick={run}>Prepare Print / Export</button>
+        <span style={{ fontSize: "0.75rem", color: "#64748b", alignSelf: "center" }}>
+          Collections are money in. A handover is the same cash reaching the
+          till, so it is listed but never added to the totals.
+        </span>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+          gap: 10,
+          marginBottom: 18,
+        }}
+      >
+        <StatBox label="Collected (field)" value={currency(collected)} tone="#16a34a" />
+        <StatBox label="Handed over" value={currency(handedOver)} tone="#f59e0b" />
+        <StatBox
+          label="Still with phones"
+          value={currency(collected - handedOver)}
+          tone="#5b21b6"
+        />
+        <StatBox label="Collections" value={String(t.collections ?? 0)} tone="#94a3b8" />
+      </div>
+
+      <h3 style={{ fontSize: "0.95rem", margin: "0 0 8px" }}>By collector</h3>
+      {data?.byPerson?.length ? (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Collector</th>
+              <th>Phone</th>
+              <th style={{ textAlign: "right" }}>Collections</th>
+              <th style={{ textAlign: "right" }}>Collected</th>
+              <th style={{ textAlign: "right" }}>Handed over</th>
+              <th style={{ textAlign: "right" }}>Still with them</th>
+              <th>Last activity</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.byPerson.map((r: any) => (
+              <tr key={`${r.person}-${r.phone}`}>
+                <td style={{ fontWeight: 500 }}>
+                  {r.person === "Unassigned" ? (
+                    <span style={{ color: "#b45309" }}>
+                      {r.phone ? `Phone only (${r.phone})` : "Unassigned"}
+                    </span>
+                  ) : (
+                    r.person
+                  )}
+                </td>
+                <td style={{ fontSize: "0.8rem", color: "#64748b" }}>{r.phone || "—"}</td>
+                <td style={{ textAlign: "right" }}>{Number(r.collections ?? 0)}</td>
+                <td style={{ textAlign: "right", fontWeight: 600, color: "#166534" }}>
+                  {currency(Number(r.collected ?? 0))}
+                </td>
+                <td style={{ textAlign: "right", color: "#b45309" }}>
+                  {currency(Number(r.handed_over ?? 0))}
+                </td>
+                <td style={{ textAlign: "right", fontWeight: 600 }}>
+                  {currency(Number(r.collected ?? 0) - Number(r.handed_over ?? 0))}
+                </td>
+                <td style={{ fontSize: "0.78rem", color: "#64748b" }}>
+                  {r.last_at ? String(r.last_at).slice(0, 16).replace("T", " ") : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <div style={{ padding: 16, fontSize: "0.85rem", color: "#64748b" }}>
+          No field activity in this period. Collections appear here as soon as a
+          paired phone syncs.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatBox({ label, value, tone }: { label: string; value: string; tone: string }) {
+  return (
+    <div
+      style={{
+        padding: 12,
+        border: "1px solid #e2e8f0",
+        borderLeft: `3px solid ${tone}`,
+        borderRadius: 6,
+      }}
+    >
+      <div
+        style={{
+          fontSize: "0.7rem",
+          color: "#64748b",
+          textTransform: "uppercase",
+          letterSpacing: ".04em",
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: "1.2rem", fontWeight: 700, marginTop: 3 }}>{value}</div>
+    </div>
+  );
+}
 
 function ExportTab() {
   const [from, setFrom] = useState("");

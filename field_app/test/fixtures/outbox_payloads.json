@@ -9,6 +9,7 @@
       "amount": 600,
       "customer_uuid": "3f2b1c44-9a7e-4d21-b0c8-5e6f7a8b9c01",
       "customer_name": "Ali \"Raza\" & Sons",
+      "taken_by_name": "Ali Raza",
       "note": "paid in cash\nsecond line",
       "occurred_at": "2026-09-30T19:21:20.409Z",
       "origin": "mobile"
@@ -19,6 +20,7 @@
       "amount": 600,
       "customer_uuid": "3f2b1c44-9a7e-4d21-b0c8-5e6f7a8b9c01",
       "customer_name": "Ali \"Raza\" & Sons",
+      "taken_by_name": "Ali Raza",
       "note": "paid in cash\nsecond line",
       "occurred_at": "2026-09-30T19:21:20.409Z",
       "synced": 0

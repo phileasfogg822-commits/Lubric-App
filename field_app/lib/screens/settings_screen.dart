@@ -23,14 +23,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _version = '';
   bool _testing = false;
   List<SyncFailure> _failures = const [];
+  final TextEditingController _nameCtl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    _nameCtl.text = settings.collectorName;
     _refresh();
     PackageInfo.fromPlatform().then((i) {
       if (mounted) setState(() => _version = i.version);
     });
+  }
+
+  @override
+  void dispose() {
+    _nameCtl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveName() async {
+    final messenger = ScaffoldMessenger.of(context);
+    await settings.setCollectorName(_nameCtl.text);
+    messenger.showSnackBar(SnackBar(
+      content: Text(
+        settings.collectorName.isEmpty
+            ? 'Cleared — collections will show the phone name only'
+            : 'Collections will now show as taken by ${settings.collectorName}',
+      ),
+    ));
   }
 
   Future<void> _refresh() async {
@@ -147,6 +167,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         : dateTimeLabel(last),
                   ),
                   _row('App version', _version),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Who is using this phone?',
+                      style: TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'The shop sees this on every collection you take, so they '
+                    'know who was in the field. Set it once.',
+                    style: TextStyle(
+                        fontSize: 12.5, color: Color(0xFF7A838F), height: 1.45),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _nameCtl,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: const InputDecoration(
+                          hintText: 'Your name',
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    FilledButton(
+                      onPressed: _saveName,
+                      child: const Text('Save'),
+                    ),
+                  ]),
                 ],
               ),
             ),

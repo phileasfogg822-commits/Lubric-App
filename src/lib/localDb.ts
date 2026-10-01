@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS cash_movements (
   account_id         INTEGER,
   taken_by_user_id   INTEGER,
   taken_by_device_id INTEGER,
+  taken_by_name      TEXT,
   posted_at          TEXT,
   note               TEXT DEFAULT '',
   occurred_at        TEXT,

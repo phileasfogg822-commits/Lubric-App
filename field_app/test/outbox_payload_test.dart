@@ -32,6 +32,15 @@ void main() {
   // (the server stamps it), so the fixture's outgoing row has no such key.
   const fallbackCreated = '2026-09-30T19:21:20.409Z';
 
+  // The payload for a fixture movement, including the collector. routed through
+  // one helper so a new required field cannot be silently omitted by one of the
+  // call sites below.
+  Map<String, dynamic> movementPayload(Map<String, dynamic> row) =>
+      OutboxPayload.movement(
+        movementFrom(row),
+        takenByName: (row['taken_by_name'] as String?) ?? '',
+      );
+
   Reservation reservationFrom(Map<String, dynamic> row) => Reservation(
         uuid: row['uuid'] as String,
         customerName: row['customer_name'] as String,
@@ -47,7 +56,7 @@ void main() {
     test('a collection round-trips through encode/decode unchanged', () {
       final row = (fixture['movement'] as Map<String, dynamic>)['row']
           as Map<String, dynamic>;
-      final payload = OutboxPayload.movement(movementFrom(row));
+      final payload = movementPayload(row);
 
       final decoded = jsonDecode(OutboxPayload.encode(payload));
       expect(decoded, equals(payload),
@@ -69,7 +78,7 @@ void main() {
       final row = (fixture['movement'] as Map<String, dynamic>)['row']
           as Map<String, dynamic>;
       final raw =
-          OutboxPayload.encode(OutboxPayload.movement(movementFrom(row)));
+          OutboxPayload.encode(movementPayload(row));
 
       // `:collection` with no quotes is the literal failure reported
       // ("kind":collection). It must be impossible to produce again.
@@ -98,8 +107,8 @@ void main() {
     test('numbers stay numbers', () {
       final row = (fixture['movement'] as Map<String, dynamic>)['row']
           as Map<String, dynamic>;
-      final decoded = jsonDecode(
-              OutboxPayload.encode(OutboxPayload.movement(movementFrom(row))))
+      final decoded =
+          jsonDecode(OutboxPayload.encode(movementPayload(row)))
           as Map<String, dynamic>;
       expect(decoded['amount'], isA<num>());
       expect(decoded['amount'] as num, closeTo(600, 1e-9));
