@@ -1,19 +1,18 @@
 import type { Product, CustomerType, CartItem } from "../../lib/types";
 import { dbGet, dbExecute, dbSelect, dbTransaction } from "../../lib/db";
 
+import { resolvePrice, type PriceSource } from "../../lib/pricing";
 import { stockOut } from "../../lib/stock";
 import { newUuid } from "../../lib/uuid";
-import { resolvePrice, type PriceSource } from "../../lib/pricing";
 
 export type { CartItem };
 
-/** Bottle size in litres, parsed from a product's packing label ("4L", "500ml", "4"). */
-export function packLitres(p?: Product | null): number {
-  const raw = String((p as any)?.packing ?? "").trim().toLowerCase();
-  const n = parseFloat(raw.replace(/[^\d.]/g, ""));
-  if (!isFinite(n) || n <= 0) return 0;
-  return /ml/.test(raw) ? n / 1000 : n; // 500ml -> 0.5L
-}
+// Moved out to lib/units.ts and re-exported here, so the five existing call
+// sites (POS, POSCart, EditButton) are untouched. It had NO test while it was
+// defined in this file, which is how two real bugs survived: the regex reported
+// a 1kg tub of grease as "1 litre", and read "-4L" as 4 litres.
+import { packLitres } from "../../lib/units";
+export { packLitres };
 
 /**
  * How much oil is left in the bottle: pack size minus what the engine took.

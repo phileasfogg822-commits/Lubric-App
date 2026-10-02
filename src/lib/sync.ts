@@ -33,6 +33,9 @@ export const SYNC_TABLES = [
   // Customer groups (migration 031). The group decides the price tier, so an
   // offline till that lacks it would bill a wholesale customer at retail.
   "customer_groups",
+  // Units (migration 032) - read-mostly, replicated so pack sizes can be shown
+  // as configured data rather than re-parsed from a string on every device.
+  "units", "unit_conversions",
 ] as const;
 
 const OUTBOX_SCHEMA = `

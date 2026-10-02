@@ -492,6 +492,10 @@ const SYNC_TABLES = {
   // Customer groups (migration 031) decide the price tier, so they replicate for
   // the same reason the price lists do.
   customer_groups: {},
+  // Units (migration 032) replicate so every device agrees on what a "litre" is
+  // and how many decimals it carries, rather than each re-parsing a string.
+  units: {},
+  unit_conversions: {},
 };
 
 /** Resolve a device from its bearer token. Sets req.device or leaves null. */

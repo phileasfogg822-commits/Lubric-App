@@ -301,6 +301,38 @@ CREATE TABLE IF NOT EXISTS customer_groups (
 CREATE INDEX IF NOT EXISTS idx_groups_shop ON customer_groups(shop_id, active);
 `;
 
+// Part 8: units (server/migrations/032_units.sql).
+//
+// Additive only. products.packing and products.unit remain the source the POS
+// actually reads, so a product with no unit_id still behaves exactly as before -
+// the tables exist so units are CONFIGURED rather than reverse-engineered from a
+// string, and so the next pack type needs a row rather than a new regex.
+export const LOCAL_SCHEMA_8 = `
+CREATE TABLE IF NOT EXISTS units (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid           TEXT UNIQUE,
+  shop_id        INTEGER DEFAULT 1,
+  name           TEXT NOT NULL,
+  plural         TEXT,
+  abbreviation   TEXT,
+  dimension      TEXT DEFAULT 'count',
+  decimal_places INTEGER DEFAULT 0,
+  litres_each    REAL,
+  active         INTEGER DEFAULT 1,
+  created_at     TEXT DEFAULT (datetime('now')),
+  updated_at     TEXT
+);
+CREATE TABLE IF NOT EXISTS unit_conversions (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid         TEXT UNIQUE,
+  from_unit_id INTEGER NOT NULL,
+  to_unit_id   INTEGER NOT NULL,
+  multiplier   REAL NOT NULL,
+  created_at   TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_unitconv_from ON unit_conversions(from_unit_id, to_unit_id);
+`;
+
 /**
  * Columns the sync layer needs that this schema predates: 012_sync added uuid,
  * shop_id and updated_at to every replicated table, but an existing local
@@ -356,6 +388,10 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
         "ALTER TABLE customers ADD COLUMN group_id INTEGER"
       );
       await db.execute(LOCAL_SCHEMA_7);
+      // products.unit_id comes from the sync, so the local table must have the
+      // column or the pull fails on it.
+      await db.execute("ALTER TABLE products ADD COLUMN unit_id INTEGER");
+      await db.execute(LOCAL_SCHEMA_8);
       await db.execute(LOCAL_SEED);
       // Columns first, then the index that depends on them.
       await patchSyncColumns(db);

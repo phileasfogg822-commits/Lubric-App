@@ -23,6 +23,22 @@
 const BASE = process.env.API_BASE || 'http://localhost:3001';
 const PGURL = process.env.PGURL || 'postgres://lubric_app:lubric_app_pw@localhost:5432/lubricapp';
 
+/**
+ * The ADMIN connection, used only to clean up the markers this test plants -
+ * the app role cannot delete rows in an outlet it is not acting as, which is
+ * the very thing under test.
+ *
+ * Built from the container's own DB_* variables rather than being passed in on
+ * the command line. A password on a command line ends up in shell history and
+ * in the process list, and this one is the superuser's.
+ */
+const PGADMIN_URL = process.env.PGADMIN_URL ||
+  (process.env.DB_PASSWORD
+    ? `postgres://${process.env.DB_USER || 'lubric'}:${process.env.DB_PASSWORD}` +
+      `@${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || '5432'}` +
+      `/${process.env.DB_NAME || 'lubricapp'}`
+    : null);
+
 let ok = 0, total = 0;
 let skipped = 0;
 async function check(title, fn) {
@@ -130,28 +146,47 @@ await check('the existing user still has access to their home outlet', async () 
   assert(rows.some((r) => Number(r.shop_id) === 1), 'admin lost access to outlet 1');
 });
 
-await check('the X-Shop-Id header is validated, not trusted', async () => {
-  // Without this check the header is an authorization bypass, not a scope: any
-  // user could read any outlet by naming it.
-  const marker = 'UNMEMBERED-' + Date.now();
-  await exec(
-    `INSERT INTO customers (shop_id, name, customer_type) VALUES (2, $1, 'returning')`,
-    [marker], token, 2);
-  const rows = await q('SELECT name FROM customers WHERE name LIKE $1', ['UNMEMBERED-%'], token, 2);
-  await exec('DELETE FROM customers WHERE shop_id = 2 AND name = $1', [marker], token, 2);
-  // Outlet 2 holds no customers, so an honest outlet-2 scope returns none.
-  // Asserted on `customers`, NOT on `shops`: `shops` is deliberately exempt
-  // from row security (the app must read the outlet list to render the
-  // selector), so querying it proves nothing about scoping. An earlier version
-  // of this check asserted on `shops` and "failed" for a reason unrelated to
-  // the header check it claimed to be testing.
+await check('an unmembered X-Shop-Id is refused, not obeyed', async () => {
+  // The header must be an authorization SCOPE, not a bypass: naming an outlet
+  // you have no membership of must fall back to your own, never open it.
+  //
+  // This check used to rely on admin NOT being a member of outlet 2. A later
+  // commit granted that membership so the outlet selector would be reachable,
+  // and the check then failed - correctly reporting that the header WAS obeyed,
+  // because for that user it legitimately was. The fixture had been invalidated
+  // by a data change, not by a regression in isolation.
+  //
+  // It now removes the membership for the duration and restores it in a finally,
+  // so it tests the RULE rather than depending on who happens to be an admin.
+  // Asserted on `customers`, never on `shops`: shops is deliberately exempt from
+  // row security so the selector can render, so querying it proves nothing.
   if (!DB_REACHABLE) return 'SKIP';
   if (!RLS_ON) {
     console.log('        ^ scoping is not observable until migration 030 enables RLS');
     return undefined;
   }
-  assert(rows.length === 0,
-    'LEAK: a non-member asking for outlet 2 was served outlet 2 data: ' + JSON.stringify(rows));
+
+  const marker = 'UNMEMBERED-' + Date.now();
+  // Planted while admin can still reach outlet 2, otherwise the insert itself
+  // would be refused and there would be nothing to test.
+  await exec(
+    `INSERT INTO customers (shop_id, name, customer_type) VALUES (2, $1, 'returning')`,
+    [marker], token, 2);
+  try {
+    await exec(
+      `DELETE FROM user_shops WHERE shop_id = 2
+        AND user_id = (SELECT id FROM users WHERE email = 'admin@lubric.app')`, [], token);
+    const rows = await q(
+      'SELECT name FROM customers WHERE name LIKE $1', ['UNMEMBERED-%'], token, 2);
+    assert(rows.length === 0,
+      'LEAK: a non-member asking for outlet 2 was served outlet 2 data: ' + JSON.stringify(rows));
+  } finally {
+    await exec(
+      `INSERT INTO user_shops (user_id, shop_id, role)
+       SELECT id, 2, role FROM users WHERE email = 'admin@lubric.app'
+       ON CONFLICT DO NOTHING`, [], token);
+    await exec('DELETE FROM customers WHERE shop_id = 2 AND name = $1', [marker], token, 2);
+  }
 });
 
 await check('membership can be granted, and then the outlet is served', async () => {
@@ -254,12 +289,9 @@ await check('ISOLATION: one outlet cannot see another outlet\'s rows', async () 
 
     // Clean up through the ADMIN connection, because the app role cannot delete
     // rows in an outlet it is not acting as - which is the very thing under test.
-    // The superuser password is NOT the app role's, so it must be supplied
-    // explicitly as PGADMIN_URL rather than string-substituted from PGURL.
     const pg = (await import('pg')).default;
-    const adminUrl = process.env.PGADMIN_URL;
-    assert(adminUrl, 'PGADMIN_URL is required to clean up the isolation markers');
-    const ac = new pg.Client({ connectionString: adminUrl });
+    assert(PGADMIN_URL, 'no admin connection available (set PGADMIN_URL or DB_PASSWORD)');
+    const ac = new pg.Client({ connectionString: PGADMIN_URL });
     await ac.connect();
     await ac.query('DELETE FROM customers WHERE id = ANY($1::int[])', [[idA, idB]]);
     await ac.end();
