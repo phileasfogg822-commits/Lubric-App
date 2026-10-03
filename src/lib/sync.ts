@@ -36,6 +36,11 @@ export const SYNC_TABLES = [
   // Units (migration 032) - read-mostly, replicated so pack sizes can be shown
   // as configured data rather than re-parsed from a string on every device.
   "units", "unit_conversions",
+  // Warehouses and their locations (migration 033). stock_levels is NOT here:
+  // it is a derived cache, and stock_movements already replicates. Replicating
+  // both would hand the desktop two truths that can arrive out of step - the
+  // exact disagreement migration 033 exists to prevent.
+  "warehouses", "warehouse_locations",
 ] as const;
 
 const OUTBOX_SCHEMA = `

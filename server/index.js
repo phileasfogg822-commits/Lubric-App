@@ -496,6 +496,11 @@ const SYNC_TABLES = {
   // and how many decimals it carries, rather than each re-parsing a string.
   units: {},
   unit_conversions: {},
+  // Warehouses and locations (migration 033). stock_levels is deliberately
+  // absent: it is derived, stock_movements already replicates, and syncing a
+  // cache alongside its own source is how the two arrive out of step.
+  warehouses: {},
+  warehouse_locations: {},
 };
 
 /** Resolve a device from its bearer token. Sets req.device or leaves null. */

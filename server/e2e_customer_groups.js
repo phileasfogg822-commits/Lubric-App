@@ -150,8 +150,13 @@ await check('the local SQLite replica has the group tables', async () => {
   const src = fs.readFileSync(new URL('../src/lib/localDb.ts', import.meta.url), 'utf8');
   assert(/CREATE TABLE IF NOT EXISTS customer_groups/.test(src),
     'localDb.ts has no customer_groups table - offline pricing would throw');
-  assert(/ALTER TABLE customers ADD COLUMN group_id/.test(src),
-    'localDb.ts does not add customers.group_id - the sync pull would fail on it');
+  // Asserted on the PATCH, not on a raw ALTER. This check originally demanded
+  // "ALTER TABLE customers ADD COLUMN group_id" - and a raw ALTER throws
+  // "duplicate column name" on the SECOND app launch, where ensureLocalSchema's
+  // catch rethrows and offline mode never recovers. It was asserting the buggy
+  // implementation.
+  assert(/table: "customers", column: "group_id"/.test(src),
+    'customers.group_id is not patched in via SYNC_COLUMN_PATCHES - the sync pull would fail on it');
   assert(/db\.execute\(LOCAL_SCHEMA_7\)/.test(src), 'LOCAL_SCHEMA_7 is never executed');
 });
 

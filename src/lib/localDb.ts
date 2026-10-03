@@ -333,6 +333,48 @@ CREATE TABLE IF NOT EXISTS unit_conversions (
 CREATE INDEX IF NOT EXISTS idx_unitconv_from ON unit_conversions(from_unit_id, to_unit_id);
 `;
 
+// Part 9: warehouses and locations (server/migrations/033_warehouses.sql).
+//
+// stock_movements gains warehouse_id and location_id, so the local table must
+// grow those columns too or the sync INSERT fails on a whole pull. stock_levels
+// is the per-warehouse cache, read by the stock screens.
+export const LOCAL_SCHEMA_9 = `
+CREATE TABLE IF NOT EXISTS warehouses (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid       TEXT UNIQUE,
+  shop_id    INTEGER DEFAULT 1,
+  name       TEXT NOT NULL,
+  code       TEXT,
+  address    TEXT,
+  is_default INTEGER DEFAULT 0,
+  active     INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS warehouse_locations (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid         TEXT UNIQUE,
+  warehouse_id INTEGER NOT NULL,
+  shop_id      INTEGER DEFAULT 1,
+  name         TEXT NOT NULL,
+  code         TEXT,
+  kind         TEXT DEFAULT 'rack',
+  active       INTEGER DEFAULT 1,
+  created_at   TEXT DEFAULT (datetime('now')),
+  updated_at   TEXT
+);
+CREATE TABLE IF NOT EXISTS stock_levels (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid         TEXT UNIQUE,
+  shop_id      INTEGER DEFAULT 1,
+  warehouse_id INTEGER NOT NULL,
+  product_id   INTEGER NOT NULL,
+  qty          REAL DEFAULT 0,
+  updated_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_stock_levels_product ON stock_levels(product_id);
+`;
+
 /**
  * Columns the sync layer needs that this schema predates: 012_sync added uuid,
  * shop_id and updated_at to every replicated table, but an existing local
@@ -360,6 +402,16 @@ const SYNC_COLUMN_PATCHES: { table: string; column: string; decl: string }[] = [
   { table: "order_items", column: "leftover_to", decl: "TEXT DEFAULT 'customer'" },
   { table: "order_items", column: "leftover_released", decl: "INTEGER DEFAULT 0" },
   { table: "order_items", column: "billed_by_capacity", decl: "INTEGER DEFAULT 0" },
+  // Columns added by later migrations, kept here rather than as raw ALTER
+  // statements in ensureLocalSchema. The difference matters: a raw ALTER throws
+  // "duplicate column name" on the SECOND app launch, the catch in
+  // ensureLocalSchema rethrows, and offline mode never recovers. patchSyncColumns
+  // checks PRAGMA table_info first, so it is a no-op the second time.
+  { table: "customers", column: "group_id", decl: "INTEGER" },
+  { table: "products", column: "unit_id", decl: "INTEGER" },
+  // stock_movements grows the location dimension (migration 033).
+  { table: "stock_movements", column: "warehouse_id", decl: "INTEGER" },
+  { table: "stock_movements", column: "location_id", decl: "INTEGER" },
 ];
 
 async function patchSyncColumns(db: { select: (s: string) => Promise<unknown>; execute: (s: string) => Promise<unknown> }): Promise<void> {
@@ -381,17 +433,13 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       await db.execute(LOCAL_SCHEMA_4);
       await db.execute(LOCAL_SCHEMA_5);
       await db.execute(LOCAL_SCHEMA_6);
-      // customers.group_id points at the group that decides the price, so it is
-      // added here too. Without the column the sync INSERT for a customer fails
-      // and takes the whole pull with it.
-      await db.execute(
-        "ALTER TABLE customers ADD COLUMN group_id INTEGER"
-      );
+      // Every added column goes through patchSyncColumns below, never as a raw
+      // ALTER: SQLite has no ADD COLUMN IF NOT EXISTS, a duplicate-column error
+      // rethrows out of this catch, and offline mode never recovers on the next
+      // launch. Customers.group_id and products.unit_id used to be raw ALTERs.
       await db.execute(LOCAL_SCHEMA_7);
-      // products.unit_id comes from the sync, so the local table must have the
-      // column or the pull fails on it.
-      await db.execute("ALTER TABLE products ADD COLUMN unit_id INTEGER");
       await db.execute(LOCAL_SCHEMA_8);
+      await db.execute(LOCAL_SCHEMA_9);
       await db.execute(LOCAL_SEED);
       // Columns first, then the index that depends on them.
       await patchSyncColumns(db);
