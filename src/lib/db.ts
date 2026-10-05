@@ -68,7 +68,7 @@ async function getLocal(): Promise<any> {
   return localConn;
 }
 
-function apiBase(): string {
+export function apiBase(): string {
   try {
     const override = localStorage.getItem("lubric_api_url");
     return override || DEFAULT_API_BASE;
@@ -105,7 +105,7 @@ export function setActiveShopId(id: number | string): void {
  * The backend's permission guard requires a Bearer token on every call, and
  * the outlet must ride along with it so row security can apply.
  */
-function authHeaders(): Record<string, string> {
+export function authHeaders(): Record<string, string> {
   try {
     const token = localStorage.getItem('lubric_token');
     const shop = localStorage.getItem(ACTIVE_SHOP_KEY);

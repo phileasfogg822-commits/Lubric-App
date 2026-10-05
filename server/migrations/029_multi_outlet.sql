@@ -120,7 +120,12 @@ DECLARE
   -- PostgreSQL (used by ON CONFLICT DO UPDATE SET) and is rejected as a
   -- variable name.
   skip_tables text[] := ARRAY[
-    'shops', 'users', 'devices', 'user_shops', 'settings', 'role_permissions'
+    'shops', 'users', 'devices', 'user_shops', 'settings', 'role_permissions',
+    -- Deployment config, not outlet data: shop_id is mostly NULL, branding is
+    -- read pre-login and flags gate nav for every session. The generic outlet
+    -- policy would hide the global (NULL) rows outright. Same class as
+    -- `settings`. 034 repairs anything an earlier boot already made here.
+    'config', 'feature_flags'
   ];
   made       INTEGER := 0;
 BEGIN

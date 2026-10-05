@@ -36,14 +36,17 @@ async function check(title, fn) {
 function assert(c, m) {
   if (!c) throw new Error(m || 'assertion failed');
 }
-async function post(path, body, token) {
+async function post(path, body, token, shopId) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = 'Bearer ' + token;
+  // Row security hides every outlet but the ACTIVE one, so a per-outlet check
+  // has to say which outlet it means - the same X-Shop-Id the browser sends.
+  if (shopId) headers['X-Shop-Id'] = String(shopId);
   const res = await fetch(BASE + path, { method: 'POST', headers, body: JSON.stringify(body) });
   return { status: res.status, body: await res.json().catch(() => ({})) };
 }
-async function q(sql, params, token) {
-  const { status, body } = await post('/api/query', { sql, params }, token);
+async function q(sql, params, token, shopId) {
+  const { status, body } = await post('/api/query', { sql, params }, token, shopId);
   if (status !== 200) throw new Error('query ' + status + ' ' + JSON.stringify(body));
   return body;
 }
@@ -53,7 +56,11 @@ async function exec(sql, params, token) {
 
 console.log('\nWarehouses and locations');
 
-const atok = (await post('/api/auth/login', { email: 'admin@lubric.app', password: 'admin123' })).body.token;
+const login = await post('/api/auth/login', { email: 'admin@lubric.app', password: 'admin123' });
+const atok = login.body.token;
+// Every outlet this login may enter. Row security makes a cross-outlet query
+// impossible in one request, so the default-warehouse check walks this list.
+const myOutlets = login.body.shops || [];
 const created = { products: [], warehouses: [] };
 
 async function insert(sql, params) {
@@ -81,15 +88,22 @@ async function totalOf(pid) {
   return Number(rows[0].stock_qty);
 }
 
-await check('every outlet has exactly one default warehouse', async () => {
-  const rows = await q(
-    `SELECT s.name AS outlet, COUNT(w.id) FILTER (WHERE w.is_default AND w.active = 1) AS defaults
-       FROM shops s LEFT JOIN warehouses w ON w.shop_id = s.id
-      GROUP BY s.id, s.name ORDER BY s.id`, [], atok);
-  assert(rows.length > 0, 'no outlets found');
-  for (const r of rows) {
-    assert(Number(r.defaults) === 1,
-      `outlet "${r.outlet}" has ${r.defaults} default warehouse(s) - the POS has no bin to fall back to`);
+await check('every outlet the login can enter has exactly one default warehouse', async () => {
+  // shops is identity-exempt (a login must list outlets for the selector), but
+  // warehouses sits behind row security: one session sees only its ACTIVE
+  // outlet. The old cross-outlet join therefore reported 0 for every outlet
+  // except the active one and read like missing data. Ask once per outlet
+  // instead, with the header the browser itself sends.
+  assert(myOutlets.length > 0, 'login returned no outlets');
+  for (const o of myOutlets) {
+    const rows = await q(
+      `SELECT COUNT(*)::int AS defaults
+         FROM warehouses
+        WHERE shop_id = $1 AND is_default AND active = 1`,
+      [o.shop_id], atok, o.shop_id);
+    assert(rows.length === 1, 'no count row for outlet ' + o.name);
+    assert(Number(rows[0].defaults) === 1,
+      `outlet "${o.name}" has ${rows[0].defaults} default warehouse(s) - the POS has no bin to fall back to`);
   }
 });
 

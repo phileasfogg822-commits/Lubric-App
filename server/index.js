@@ -119,6 +119,11 @@ const READ_PERMISSIONS = {
   role_permissions: [P.TEAM_MANAGE],
   shops: [P.DASHBOARD, P.SHOP_MANAGE],
   settings: [P.DASHBOARD, P.SHOP_MANAGE],
+  // Deployment config carries the payment gateway and support contacts, and
+  // flags steer which modules exist - read them the way settings is read, not
+  // the unlisted default. Same lesson as `devices` above: unlisted = allowed.
+  config: [P.SHOP_MANAGE],
+  feature_flags: [P.SHOP_MANAGE],
   reminders: [P.DASHBOARD],
 };
 
@@ -156,6 +161,10 @@ const WRITE_PERMISSIONS = {
   devices: [P.TEAM_MANAGE],
   shops: [P.SHOP_MANAGE],
   settings: [P.SHOP_MANAGE],
+  // Writes go through the admin-gated REST routes in production; this entry is
+  // the floor for the SQL path, so a cashier cannot flip flags directly.
+  config: [P.SHOP_MANAGE],
+  feature_flags: [P.SHOP_MANAGE],
   reminders: [P.DASHBOARD],
 };
 
@@ -943,6 +952,178 @@ app.get('/api/v1/app/download', async (req, res) => {
     'Content-Disposition',
     `attachment; filename="${name}"`);
   fs.createReadStream(file).pipe(res);
+});
+
+// ─── Config & Feature Flags ────────────────────────────────────────────────
+//
+// Reads / writes the level-A deployment config and per-tenant feature flags.
+// The global authMiddleware above populates req.user but never rejects, so
+// each route states its own rule: branding keys on /api/config are readable
+// pre-login (so the login screen can carry the tenant's name/colours), every
+// other config row and all flags need a session, and writes need admin/owner.
+
+// Branding-safe keys — the only ones a caller without `shop.manage` may read.
+const PUBLIC_CONFIG_KEYS = new Set(['app_name', 'primary_color', 'default_branding']);
+
+// Full config (payment gateway, DB environment, module manifest) is for
+// admins and whoever holds shop.manage — the same floor the SQL guard uses
+// on the /api/query path, so the two doors into the table agree.
+async function canReadFullConfig(req) {
+  if (!req.user) return false;
+  const entry = await loadPermissions(req.user.id, req.user.role);
+  return entry.isAdmin || entry.perms.includes(P.SHOP_MANAGE);
+}
+
+// GET /api/config — read config rows (or filter by ?key=X).
+// Full row set for admins/shop managers; other sessions and no session see
+// only the branding-safe subset.
+app.get('/api/config', async (req, res) => {
+  try {
+    const key = typeof req.query.key === 'string' ? req.query.key : undefined;
+    const where = key ? 'WHERE key = $1' : '';
+    const sql = `SELECT key, value, shop_id, updated_at FROM config ${where}`;
+    const params = key ? [key] : [];
+    const { rows } = await pool.query(sql, params);
+    const visible = (await canReadFullConfig(req))
+      ? rows
+      : rows.filter((r) => PUBLIC_CONFIG_KEYS.has(r.key));
+    res.json(visible);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/config/:key — read a single config key (same visibility rules)
+app.get('/api/config/:key', async (req, res) => {
+  try {
+    const { key } = req.params;
+    if (!PUBLIC_CONFIG_KEYS.has(key)) {
+      if (!req.user) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      if (!(await canReadFullConfig(req))) {
+        return res.status(403).json({ error: 'Permission denied', required: ['shop.manage'] });
+      }
+    }
+    const sql = 'SELECT key, value, shop_id, updated_at FROM config WHERE key = $1';
+    const { rows } = await pool.query(sql, [key]);
+    if (rows.length) {
+      res.json(rows[0]);
+    } else {
+      res.status(404).json({ error: 'Config key not found' });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PATCH /api/config/:key — update a config key (admin only)
+app.patch('/api/config/:key', async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    if (!ADMIN_ROLES.has(req.user.role)) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const { key } = req.params;
+    const { value } = req.body;
+    if (value === undefined) {
+      return res.status(400).json({ error: 'value is required' });
+    }
+    const sql = `
+      UPDATE config SET value = $1, updated_at = NOW()
+      WHERE key = $2
+      RETURNING key, value, shop_id, updated_at
+    `;
+    const { rows } = await pool.query(sql, [value, key]);
+    if (rows.length) {
+      res.json(rows[0]);
+    } else {
+      // Insert if not exists (idempotent)
+      const insSql = `
+        INSERT INTO config (key, value, shop_id, updated_at)
+        VALUES ($1, $2, NULL, NOW())
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+        RETURNING key, value, shop_id, updated_at
+      `;
+      const { rows: inserted } = await pool.query(insSql, [key, value]);
+      res.json(inserted[0]);
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/feature-flags — read all feature flags (session required)
+app.get('/api/feature-flags', async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    const sql = 'SELECT key, enabled, shop_id, updated_at FROM feature_flags';
+    const { rows } = await pool.query(sql);
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/feature-flags/:key — read a single feature flag (session required)
+app.get('/api/feature-flags/:key', async (req, res) => {
+  try {
+    const { key } = req.params;
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    const sql = 'SELECT key, enabled, shop_id, updated_at FROM feature_flags WHERE key = $1';
+    const { rows } = await pool.query(sql, [key]);
+    if (rows.length) {
+      res.json(rows[0]);
+    } else {
+      res.status(404).json({ error: 'Feature flag not found' });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PATCH /api/feature-flags/:key — toggle a feature flag (admin only)
+app.patch('/api/feature-flags/:key', async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    if (!ADMIN_ROLES.has(req.user.role)) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const { key } = req.params;
+    const { enabled } = req.body;
+    if (enabled === undefined) {
+      return res.status(400).json({ error: 'enabled boolean is required' });
+    }
+    const sql = `
+      UPDATE feature_flags SET enabled = $1, updated_at = NOW()
+      WHERE key = $2
+      RETURNING key, enabled, shop_id, updated_at
+    `;
+    const { rows } = await pool.query(sql, [enabled, key]);
+    if (rows.length) {
+      res.json(rows[0]);
+    } else {
+      // Insert if not exists
+      const insSql = `
+        INSERT INTO feature_flags (key, enabled, shop_id, updated_at)
+        VALUES ($1, $2, NULL, NOW())
+        ON CONFLICT (key) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = NOW()
+        RETURNING key, enabled, shop_id, updated_at
+      `;
+      const { rows: inserted } = await pool.query(insSql, [key, enabled]);
+      res.json(inserted[0]);
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Express error-handling middleware MUST be registered last, after every route,

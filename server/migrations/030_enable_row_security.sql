@@ -35,7 +35,9 @@ DO $enable$
 DECLARE
   t          record;
   skip_tables text[] := ARRAY[
-    'shops', 'users', 'devices', 'user_shops', 'settings', 'role_permissions'
+    'shops', 'users', 'devices', 'user_shops', 'settings', 'role_permissions',
+    -- Deployment config, not outlet data - see the note in 029.
+    'config', 'feature_flags'
   ];
   enabled    INTEGER := 0;
 BEGIN
