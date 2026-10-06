@@ -1,0 +1,83 @@
+<resources>
+    <string name="app_name">LubrcApp</string>
+
+    <!-- Strings for navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_transactions">Transactions</string>
+    <string name="nav_items">Items</string>
+    <string name="nav_parties">Parties</string>
+    <string name="nav_more">More</string>
+
+    <!-- Strings for common UI -->
+    <string name="common_yes">Yes</string>
+    <string name="common_no">No</string>
+    <string name="common_save">Save</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_delete">Delete</string>
+    <string name="common_edit">Edit</string>
+    <string name="common_add">Add</string>
+    <string name="common_search">Search</string>
+    <string name="common_filter">Filter</string>
+    <string name="common_next">Next</string>
+    <string name="common_back">Back</string>
+    <string name="common_done">Done</string>
+    <string name="common_close">Close</string>
+    <string name="common_submit">Submit</string>
+    <string name="common_print">Print</string>
+    <string name="common_share">Share</string>
+    <string name="common_export">Export</string>
+
+    <!-- Strings for onboarding -->
+    <string name="onboarding_welcome">Welcome to LubrcApp</string>
+    <string name="onboarding_welcome_message">A white-label business management platform.</string>
+    <string name="onboarding_language">Select Language</string>
+    <string name="onboarding_create_business">Create New Business</string>
+    <string name="onboarding_join_business">Join Existing Business</string>
+    <string name="onboarding_restore">Restore from Backup</string>
+
+    <!-- Strings for auth -->
+    <string name="auth_phone">Mobile Number</string>
+    <string name="auth_email">Email Address</string>
+    <string name="auth_password">Password</string>
+    <string name="auth_otp">Enter OTP</string>
+    <string name="auth_login">Login</string>
+    <string name="auth_logout">Logout</string>
+    <string name="auth_create_account">Create Account</string>
+    <string name="auth_forgot_password">Forgot Password?</string>
+
+    <!-- Strings for dashboard -->
+    <string name="dashboard_today_sales">Today\'s Sales</string>
+    <string name="dashboard_today_purchases">Today\'s Purchases</string>
+    <string name="dashboard_receivable">Receivable</string>
+    <string name="dashboard_payable">Payable</string>
+    <string name="dashboard_cash">Cash</string>
+    <string name="dashboard_bank">Bank</string>
+    <string name="dashboard_low_stock">Low Stock</string>
+    <string name="dashboard_out_of_stock">Out of Stock</string>
+    <string name="dashboard_pending_orders">Pending Orders</string>
+    <string name="dashboard_overdue_payments">Overdue Payments</string>
+
+    <!-- Strings for quick actions -->
+    <string name="quick_add_sale">+ Sale</string>
+    <string name="quick_add_purchase">+ Purchase</string>
+    <string name="quick_add_order">+ Order</string>
+    <string name="quick_add_payment_in">+ Payment In</string>
+    <string name="quick_add_payment_out">+ Payment Out</string>
+    <string name="quick_quotation">Quotation</string>
+    <string name="quick_sales_order">Sales Order</string>
+    <string name="quick_purchase_order">Purchase Order</string>
+    <string name="quick_delivery_challan">Delivery Challan</string>
+    <string name="quick_expense">Expense</string>
+    <string name="quick_income">Income</string>
+    <string name="quick_stock_adjustment">Stock Adjustment</string>
+    <string name="quick_party">Party</string>
+    <string name="quick_item">Item</string>
+
+    <!-- Strings for main navigation -->
+    <string name="nav_home_title">Home</string>
+    <string name="nav_transactions_title">Transactions</string>
+    <string name="nav_items_title">Items</string>
+    <string name="nav_parties_title">Parties</string>
+    <string name="nav_more_title">More</string>
+</resources>
+
