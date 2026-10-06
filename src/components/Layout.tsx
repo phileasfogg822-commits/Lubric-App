@@ -1,6 +1,8 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { isAdminRole } from "../lib/permissions";
+import { useConfigMap, useFlagRows, useBranding } from "../lib/useConfigFlags";
+import { moduleEnabled, pickFlag } from "../lib/configRules";
 import { NotificationBell } from "./NotificationBell";
 import ShopSelector from "./ShopSelector";
 
@@ -10,7 +12,7 @@ import ShopSelector from "./ShopSelector";
  * escapes so this file stays plain ASCII. `anyOf` opens an entry to a user who
  * holds any one of several keys — for pages that serve more than one module.
  */
-const NAV: { to: string; label: string; icon: string; permission?: string; anyOf?: string[] }[] = [
+const NAV: { to: string; label: string; icon: string; permission?: string; anyOf?: string[]; adminOnly?: boolean }[] = [
   { to: "/dashboard", label: "Dashboard", icon: "\u25A6", permission: "dashboard" },
   { to: "/reminders", label: "Reminders", icon: "\u23F0", permission: "dashboard" },
   { to: "/pos", label: "New Sale", icon: "\u{1F9FE}", permission: "pos.create" },
@@ -31,6 +33,9 @@ const NAV: { to: string; label: string; icon: string; permission?: string; anyOf
   { to: "/inspections", label: "Inspections", icon: "\u{1F50D}", permission: "inspections" },
   { to: "/team", label: "Team & Access", icon: "\u{1F464}", permission: "team.manage" },
   { to: "/shop", label: "Shop Settings", icon: "\u2699", permission: "shop.manage" },
+  // Owner-level screen: the API only lets admin/owner PATCH config, so gating
+  // it on shop.manage would show non-admin managers a page that always 403s.
+  { to: "/whitelabel", label: "White Label", icon: "\u{1F3A8}", permission: "shop.manage", adminOnly: true },
 ];
 
 export default function Layout() {
@@ -39,12 +44,31 @@ export default function Layout() {
   const admin = isAdminRole(user?.role);
   const perms: string[] = Array.isArray(user?.permissions) ? (user!.permissions as string[]) : [];
   const activeOutlet = outlets.find((o) => o.shop_id === activeShopId) ?? null;
+  // One subscription per store for the whole nav — never a hook per entry.
+  const cfg = useConfigMap();
+  const flags = useFlagRows();
+  const branding = useBranding();
 
   /** Admin/owner see everything; everyone else needs the key on their list. */
   function visible(item: (typeof NAV)[number]) {
+    if (item.adminOnly) return admin;
     if (admin) return true;
     const needed = item.anyOf ?? (item.permission ? [item.permission] : []);
     return needed.some((k) => perms.includes(k));
+  }
+
+  /**
+   * Package + runtime gate: a module the deployment does not include, or one
+   * whose feature flag is off, never shows in the nav — whatever the role.
+   * Both rules fail open (unreadable manifest, unknown flag), so nav falls
+   * back to permission-gating alone instead of vanishing on a config miss.
+   */
+  function inPackage(item: (typeof NAV)[number]) {
+    const needed = item.anyOf ?? (item.permission ? [item.permission] : []);
+    if (!needed.length) return true;
+    return needed.some(
+      (k) => moduleEnabled(cfg["included_modules"], k) && pickFlag(flags, k),
+    );
   }
 
   function handleLogout() {
@@ -78,7 +102,10 @@ export default function Layout() {
           }}
         >
           <div>
-            LUBRIC POS
+            {/* Tenant's name from config, not a hardcoded label: a fixed brand
+                above data from whichever tenant/outlet is selected is how a
+                white-label deployment stops being one. */}
+            {branding.appName}
             {/* The active outlet's real name, not a hardcoded one: a fixed label
                 above data from whichever outlet is selected is how a shopkeeper
                 reads one outlet's takings while believing they are another's. */}
@@ -92,7 +119,7 @@ export default function Layout() {
         <ShopSelector />
 
         <nav style={{ flex: 1, overflow: "auto", padding: "0.5rem 0" }}>
-          {NAV.filter(visible).map((item) => (
+          {NAV.filter(visible).filter(inPackage).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

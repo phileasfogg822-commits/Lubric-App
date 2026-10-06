@@ -3,6 +3,10 @@ import { can, isAdminRole, parsePermissions } from "./permissions";
 // Aliased: the context exposes an `activeShopId` VALUE, and importing the
 // getter under the same name would shadow it inside the provider.
 import { setActiveShopId, activeShopId as readActiveShopId } from "./db";
+// Config/flag caches are keyed to WHO is asking (the pre-login fetch only
+// sees the branding subset and gets 401 on flags), so they are dropped at
+// every identity change.
+import { invalidateConfigCache } from "./configFlags";
 
 export interface User {
   id: number;
@@ -127,6 +131,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await res.json();
       if (data.user && data.token) {
         localStorage.setItem(TOKEN_KEY, data.token);
+        // The branding-only, flag-less caches from the pre-login screen must
+        // not survive into the session: refetch as this user.
+        invalidateConfigCache();
         setUser(data.user);
         // The outlet list arrives with the login so the selector can render
         // without a second round trip. Default to the home outlet; the effect
@@ -150,6 +157,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   function logout() {
     setUser(null);
+    // Next login may be a different role with a different module manifest.
+    invalidateConfigCache();
     // The outlet choice is cleared with the session: it is part of being
     // signed in, and leaving it behind would let the next person in start in
     // the previous person's outlet.

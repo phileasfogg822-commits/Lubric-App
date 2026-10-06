@@ -962,8 +962,12 @@ app.get('/api/v1/app/download', async (req, res) => {
 // pre-login (so the login screen can carry the tenant's name/colours), every
 // other config row and all flags need a session, and writes need admin/owner.
 
-// Branding-safe keys — the only ones a caller without `shop.manage` may read.
+// Branding-safe keys — the only ones an unauthenticated caller may read.
 const PUBLIC_CONFIG_KEYS = new Set(['app_name', 'primary_color', 'default_branding']);
+
+// Any signed-in session may read these: every role's nav gating needs the
+// module manifest, not just managers. Still hidden before login.
+const SESSION_CONFIG_KEYS = new Set(['included_modules']);
 
 // Full config (payment gateway, DB environment, module manifest) is for
 // admins and whoever holds shop.manage — the same floor the SQL guard uses
@@ -984,9 +988,10 @@ app.get('/api/config', async (req, res) => {
     const sql = `SELECT key, value, shop_id, updated_at FROM config ${where}`;
     const params = key ? [key] : [];
     const { rows } = await pool.query(sql, params);
+    const allowed = (k) => PUBLIC_CONFIG_KEYS.has(k) || SESSION_CONFIG_KEYS.has(k);
     const visible = (await canReadFullConfig(req))
       ? rows
-      : rows.filter((r) => PUBLIC_CONFIG_KEYS.has(r.key));
+      : rows.filter((r) => req.user ? allowed(r.key) : PUBLIC_CONFIG_KEYS.has(r.key));
     res.json(visible);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1001,7 +1006,7 @@ app.get('/api/config/:key', async (req, res) => {
       if (!req.user) {
         return res.status(401).json({ error: 'Authentication required' });
       }
-      if (!(await canReadFullConfig(req))) {
+      if (!SESSION_CONFIG_KEYS.has(key) && !(await canReadFullConfig(req))) {
         return res.status(403).json({ error: 'Permission denied', required: ['shop.manage'] });
       }
     }

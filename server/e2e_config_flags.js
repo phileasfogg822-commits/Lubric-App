@@ -136,6 +136,8 @@ await check('unauthenticated /api/config/:key allows branding, rejects secrets',
   assert(typeof good.body.value === 'string' && good.body.value.length > 0, 'app_name empty');
   const bad = await get('/api/config/payment_gateway');
   assert(bad.status === 401, 'payment_gateway status ' + bad.status + ', expected 401');
+  const manifest = await get('/api/config/included_modules');
+  assert(manifest.status === 401, 'included_modules status ' + manifest.status + ', expected 401 pre-login');
 });
 
 await check('unauthenticated /api/feature-flags is rejected', async () => {
@@ -208,12 +210,17 @@ await check('PATCH upserts unknown keys and cleanup removes them', async () => {
 });
 
 if (ctok) {
-  await check('cashier REST config read is branding-only', async () => {
+  await check('cashier REST config read is branding + manifest only', async () => {
     const { status, body } = await get('/api/config', ctok);
     assert(status === 200, 'status ' + status);
     const keys = new Set(body.map((r) => r.key));
-    for (const k of SECRET) assert(!keys.has(k), 'cashier can see ' + k + ' over REST');
+    // Every role's nav gating reads the manifest, so any session gets it…
+    assert(keys.has('included_modules'), 'cashier cannot read the module manifest - nav gating breaks');
     assert(keys.has('app_name'), 'cashier lost branding access');
+    // …but the server-side config stays manager-only.
+    for (const k of ['payment_gateway', 'db_environment', 'api_endpoint', 'support_email', 'support_phone']) {
+      assert(!keys.has(k), 'cashier can see ' + k + ' over REST');
+    }
   });
 
   await check('cashier single secret config key is rejected', async () => {

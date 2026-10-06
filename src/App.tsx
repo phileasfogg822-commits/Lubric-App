@@ -1,7 +1,9 @@
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth, AuthProvider } from "./lib/auth";
 import { isAdminRole } from "./lib/permissions";
+import { useConfigMap, useFlagRows, useBranding } from "./lib/useConfigFlags";
+import { moduleEnabled, pickFlag } from "./lib/configRules";
 import Layout from "./components/Layout";
 import ErrorBoundary from "./components/ErrorBoundary";
 
@@ -19,6 +21,7 @@ import Expenses from "./modules/expenses/Expenses";
 import Reports from "./modules/reports/Reports";
 import ProfitLoss from "./modules/profit/ProfitLoss";
 import Shop from "./modules/shop/Shop";
+import WhiteLabel from "./modules/settings/WhiteLabel";
 import Inspections from "./modules/inspections/Inspections";
 import Purchase from "./modules/purchase/Purchase";
 import Team from "./modules/team/Team";
@@ -32,9 +35,36 @@ function RequireAuth({ children }: { children: ReactNode }) {
 }
 
 /**
- * Route gate. Admin/owner pass everything; anyone else needs the key in their
- * `users.permissions` list. The API enforces the same keys, so hiding the page
- * is a courtesy — the data is protected server-side too.
+ * Applies tenant branding to the document: the primary colour on the CSS
+ * custom property the theme already reads (--color-primary, used by
+ * .btn-primary, :focus, and more), and the app name as the tab title.
+ * Runs pre-login too — /api/config serves branding keys without a session,
+ * so the login screen carries the tenant's identity as well. export.ts
+ * temporarily swaps document.title for print filenames and restores it, so
+ * it restores TO the tenant name.
+ */
+function Branding() {
+  const { appName, primaryColor } = useBranding();
+  useEffect(() => {
+    if (primaryColor && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(primaryColor)) {
+      document.documentElement.style.setProperty("--color-primary", primaryColor);
+    }
+    document.title = appName;
+  }, [appName, primaryColor]);
+  return null;
+}
+
+/**
+ * Route gate. Admin/owner pass every permission check; anyone else needs the
+ * key in their `users.permissions` list. The API enforces the same keys, so
+ * hiding the page is a courtesy — the data is protected server-side too.
+ *
+ * The deployment manifest (included_modules) and the feature flag for the
+ * page gate EVERYONE, admin included: a package without the module — or one
+ * that has it switched off at runtime — doesn't render its page for any
+ * role. Both are checked first and fail open when unreadable, so a transient
+ * config miss degrades to permission-gating rather than locking admins out
+ * of their own pages.
  *
  * `permission` gates on a single key; `anyOf` on any one of several, for pages
  * that serve more than one module (the khata covers customers and vendors).
@@ -49,10 +79,18 @@ function RequirePermission({
   children: ReactNode;
 }) {
   const { user } = useAuth();
+  const cfg = useConfigMap();
+  const flags = useFlagRows();
+  const needed = anyOf ?? (permission ? [permission] : []);
   if (!user) return <Navigate to="/login" replace />;
+  if (
+    needed.length &&
+    !needed.some((k) => moduleEnabled(cfg["included_modules"], k) && pickFlag(flags, k))
+  ) {
+    return <Navigate to="/dashboard" replace />;
+  }
   if (isAdminRole(user.role)) return <>{children}</>;
   if (!user.permissions || !Array.isArray(user.permissions)) return <Navigate to="/dashboard" replace />;
-  const needed = anyOf ?? (permission ? [permission] : []);
   if (!needed.some((k) => (user.permissions as string[]).includes(k))) {
     return <Navigate to="/dashboard" replace />;
   }
@@ -70,6 +108,7 @@ export default function App() {
   return (
     <AuthProvider>
       <ErrorBoundary>
+        <Branding />
         <Routes>
           <Route path="/login" element={<RedirectIfAuth><Login /></RedirectIfAuth>} />
 
@@ -95,6 +134,9 @@ export default function App() {
             <Route path="/inspections" element={<RequirePermission permission="inspections"><Inspections /></RequirePermission>} />
             <Route path="/team" element={<RequirePermission permission="team.manage"><Team /></RequirePermission>} />
             <Route path="/shop" element={<RequirePermission permission="shop.manage"><Shop /></RequirePermission>} />
+            {/* White-label admin: branding, module manifest, feature flags.
+                Gated like shop settings; PATCHes are admin/owner on the API. */}
+            <Route path="/whitelabel" element={<RequirePermission permission="shop.manage"><WhiteLabel /></RequirePermission>} />
 
             {/* Retired pages now folded into others. */}
             <Route path="/settings" element={<Navigate to="/shop" replace />} />
