@@ -36,3 +36,13 @@ apply014.sh
 checkbal.sh
 dryrun.sh
 server/_api.err
+
+# Android (lubrcapp) Local Properties - do not commit SDK path
+android/local.properties
+
+# Android (lubrcapp) build outputs
+android/.gradle/
+android/**/build/
+android/captures/
+*.iml
+.idea/

@@ -33,14 +33,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Service for background sync -->
-        <service
-            android:name=".sync.SyncService"
-            android:exported="false" />
-
-        <!-- Broadcast receiver for printer status / notifications -->
-        <receiver android:name=".sync.SyncBroadcastReceiver" android:exported="false" />
     </application>
 
 </manifest>

@@ -17,5 +17,8 @@
     <color name="success">#4CAF50</color>
     <color name="warning">#FFC107</color>
     <color name="info">#2196F3</color>
+
+    <!-- Launcher icon background (adaptive icon) -->
+    <color name="ic_launcher_background">#6200EE</color>
 </resources>
 

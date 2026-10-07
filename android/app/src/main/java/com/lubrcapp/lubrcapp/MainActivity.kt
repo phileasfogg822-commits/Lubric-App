@@ -9,10 +9,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.lubrcapp.lubrcapp.core.ui.theme.LubrcappTheme
+import com.lubrcapp.lubrcapp.core.designsystem.LubrcappTheme
+import com.lubrcapp.lubrcapp.core.ui.MainNavigation
 import com.lubrcapp.lubrcapp.feature.auth.AuthViewModel
-import com.lubrcapp.lubrcapp.feature.auth.OnboardingScreen
-import com.lubrcapp.lubrcapp.ui.MainNavigation
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

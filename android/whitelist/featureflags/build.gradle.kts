@@ -31,7 +31,7 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx")
     implementation("androidx.datastore:datastore-preferences")
-    implementation("org.jlleitschuh.gradle:ktlint-gradle:11.3.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

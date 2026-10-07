@@ -31,6 +31,7 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx")
     implementation("androidx.appcompat:appcompat")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx")
     implementation("com.google.android.material:material")
 
     testImplementation("junit:junit:4.13.2")

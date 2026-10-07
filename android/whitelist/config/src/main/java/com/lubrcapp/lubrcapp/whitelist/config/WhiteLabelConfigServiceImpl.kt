@@ -3,17 +3,16 @@ package com.lubrcapp.lubrcapp.whitelist.config
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.preferencesDataStore
 import com.lubrcapp.lubrcapp.core.cache.CacheService
-import com.lubrcapp.lubrcapp.whitelist.branding.BrandingConfig
 import com.lubrcapp.lubrcapp.whitelist.branding.BrandingConfig
 import com.lubrcapp.lubrcapp.whitelist.featureflags.FeatureFlagKeys
 import com.lubrcapp.lubrcapp.whitelist.featureflags.FeatureFlagService
 import com.lubrcapp.lubrcapp.whitelist.tenant.TenantService
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 
 class WhiteLabelConfigServiceImpl(
     private val context: Context,
@@ -23,42 +22,46 @@ class WhiteLabelConfigServiceImpl(
     private val featureFlagService: FeatureFlagService
 ) : WhiteLabelConfigService {
 
-    private val DEPLOYMENT_CONFIG_KEY = "deployment_config"
+    private val deploymentConfigKey = "deployment_config"
 
     override suspend fun getDeploymentConfig(context: Context): Deferred<DeploymentConfig> {
-        return kotlinx.coroutines.async(context.coroutineContext) {
-            val cached = cacheService.get<String>(DEPLOYMENT_CONFIG_KEY)
-            if (cached != null) {
-                return@async parseDeploymentConfig(cached)
-            }
+        return coroutineScope {
+            async(Dispatchers.IO) {
+                val cached = cacheService.get<String>(deploymentConfigKey)
+                if (cached != null) {
+                    return@async parseDeploymentConfig(cached)
+                }
 
-            // Load from server via NetworkService
-            val serverConfig = loadFromServer()
-            cacheService.set(DEPLOYMENT_CONFIG_KEY, serverConfig.toString())
-            parseDeploymentConfig(serverConfig)
+                // Load from server via NetworkService
+                val serverConfig = loadFromServer()
+                cacheService.set(deploymentConfigKey, serverConfig)
+                parseDeploymentConfig(serverConfig)
+            }
         }
     }
 
     override suspend fun getMergedConfig(context: Context): Deferred<MergedConfig> {
-        return kotlinx.coroutines.async(context.coroutineContext) {
-            val deployment = getDeploymentConfig(context).await()
-            val userBranding = loadUserBranding()
-            val themeMode = getThemeMode()
-            val language = getLanguage()
-            val features = featureFlagService.getEnabledFeatures().first()
+        return coroutineScope {
+            async(Dispatchers.IO) {
+                val deployment = getDeploymentConfig(context).await()
+                val userBranding = loadUserBranding()
+                val themeMode = getThemeMode()
+                val language = getLanguage()
+                val features = featureFlagService.getEnabledFeatures().first()
 
-            MergedConfig(
-                deployment = deployment,
-                userBranding = userBranding,
-                themeMode = themeMode,
-                language = language,
-                features = features
-            )
+                MergedConfig(
+                    deployment = deployment,
+                    userBranding = userBranding,
+                    themeMode = themeMode,
+                    language = language,
+                    features = features
+                )
+            }
         }
     }
 
     override suspend fun refreshConfig(context: Context) {
-        cacheService.set(DEPLOYMENT_CONFIG_KEY, null)
+        cacheService.remove(deploymentConfigKey)
         // Trigger server fetch
     }
 
@@ -67,7 +70,7 @@ class WhiteLabelConfigServiceImpl(
     }
 
     override fun getAppName(): String {
-        val config = cacheService.get<String>(DEPLOYMENT_CONFIG_KEY)
+        val config = cacheService.get<String>(deploymentConfigKey)
         return if (config != null) {
             parseDeploymentConfig(config).appName
         } else {
@@ -76,31 +79,29 @@ class WhiteLabelConfigServiceImpl(
     }
 
     override fun getPrimaryColor(): Int {
-        val config = cacheService.get<String>(DEPLOYMENT_CONFIG_KEY)
+        val config = cacheService.get<String>(deploymentConfigKey)
         return if (config != null) {
             val deployment = parseDeploymentConfig(config)
             deployment.defaultBranding.primaryColor
         } else {
-            0xFF6200EE
+            0xFF6200EE.toInt()
         }
     }
 
     override fun useLightMode(): Boolean {
-        val config = cacheService.get<String>(DEPLOYMENT_CONFIG_KEY)
         return when (getThemeMode()) {
             ThemeMode.SYSTEM -> {
-                // Use system default
-                android.provider.Settings.Global.getString(
-                    context.contentResolver,
-                    android.provider.Settings.Global.ACCELEROMETER_ROTATION
-                ) != null
+                // Use system default (dark theme follows system setting).
+                // In production, read from UI mode night flags.
+                // Default to light for now.
+                false
             }
             ThemeMode.LIGHT -> true
             ThemeMode.DARK -> false
         }
     }
 
-    override fun getIncludedModules(): Set<String> {
+    override suspend fun getIncludedModules(): Set<String> {
         return featureFlagService.getEnabledFeatures().first()
     }
 

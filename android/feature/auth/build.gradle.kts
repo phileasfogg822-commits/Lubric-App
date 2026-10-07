@@ -30,7 +30,7 @@ android {
         compose = true
     }
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.4"
+        kotlinCompilerExtensionVersion = "1.5.10"
     }
 }
 
@@ -40,13 +40,13 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.foundation:foundation")
     implementation("androidx.navigation:navigation-compose")
     implementation("androidx.hilt:hilt-navigation-compose")
 
     implementation(project(":core:designsystem"))
     implementation(project(":core:auth"))
     implementation(project(":core:store"))
-    implementation(project(":core:ui"))
     implementation(project(":whitelist:tenant"))
 
     testImplementation("junit:junit:4.13.2")

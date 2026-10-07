@@ -17,12 +17,12 @@ data class BrandingConfig(
     val launcherName: String = "LubrcApp",
 
     // Colors
-    @ColorInt val primaryColor: Int = 0xFF6200EE,
-    @ColorInt val secondaryColor: Int = 0xFF03DAC6,
-    @ColorInt val accentColor: Int = 0xFF03DAC6,
-    @ColorInt val successColor: Int = 0xFF4CAF50,
-    @ColorInt val warningColor: Int = 0xFFFFC107,
-    @ColorInt val errorColor: Int = 0xFFB00020,
+    @ColorInt val primaryColor: Int = 0xFF6200EE.toInt(),
+    @ColorInt val secondaryColor: Int = 0xFF03DAC6.toInt(),
+    @ColorInt val accentColor: Int = 0xFF03DAC6.toInt(),
+    @ColorInt val successColor: Int = 0xFF4CAF50.toInt(),
+    @ColorInt val warningColor: Int = 0xFFFFC107.toInt(),
+    @ColorInt val errorColor: Int = 0xFFB00020.toInt(),
 
     // Brand assets
     val appLogo: String? = null,

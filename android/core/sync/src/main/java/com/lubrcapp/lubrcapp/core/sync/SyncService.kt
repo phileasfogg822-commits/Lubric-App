@@ -53,7 +53,7 @@ class SyncService(private val context: Context) {
     fun setConnected(isConnected: Boolean) {
         _syncStatus.value = _syncStatus.value.copy(
             connected = isConnected,
-            lastSync: if (isConnected) System.currentTimeMillis() else _syncStatus.value.lastSync
+            lastSync = if (isConnected) System.currentTimeMillis() else _syncStatus.value.lastSync
         )
     }
 

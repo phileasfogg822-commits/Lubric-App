@@ -31,6 +31,7 @@ android {
 dependencies {
     implementation("androidx.work:work-runtime-ktx")
     implementation("androidx.core:core-ktx")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

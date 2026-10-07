@@ -2,6 +2,7 @@ package com.lubrcapp.lubrcapp.whitelist.config
 
 import android.content.Context
 import com.lubrcapp.lubrcapp.whitelist.branding.BrandingConfig
+import kotlinx.coroutines.Deferred
 
 /**
  * White-label configuration service.
@@ -58,7 +59,7 @@ interface WhiteLabelConfigService {
     /**
      * Get included modules (feature toggles).
      */
-    fun getIncludedModules(): Set<String>
+    suspend fun getIncludedModules(): Set<String>
 }
 
 data class DeploymentConfig(
@@ -71,8 +72,8 @@ data class DeploymentConfig(
     val defaultBranding: BrandingConfig,
     val includedModules: Set<String>,
     val paymentGateways: List<String>,
-    val supportEmail: String,
-    val supportPhone: String,
+    val supportEmail: String?,
+    val supportPhone: String?,
     val termsUrl: String?,
     val privacyUrl: String?,
     val website: String?,

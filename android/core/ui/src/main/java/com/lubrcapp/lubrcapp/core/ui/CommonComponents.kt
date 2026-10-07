@@ -1,10 +1,13 @@
 package com.lubrcapp.lubrcapp.core.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -48,16 +51,16 @@ fun ErrorState(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = "Error: $error",
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.error
-        )
-        com.lubrcapp.lubrcapp.core.designsystem.Buttons.outlineButton(
-            onClick = onRetry
-        ) {
-            Text("Retry")
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "Error: $error",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.error
+            )
+            OutlinedButton(onClick = onRetry) {
+                Text("Retry")
+            }
         }
     }
 }
@@ -75,27 +78,19 @@ fun EmptyState(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        if (actionLabel != null && onAction != null) {
-            com.lubrcapp.lubrcapp.core.designsystem.Buttons.filledButton(onClick = onAction) {
-                Text(actionLabel)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (actionLabel != null && onAction != null) {
+                Button(onClick = onAction) {
+                    Text(actionLabel)
+                }
             }
         }
     }
-}
-
-/**
- * Common button helper (for now, will be replaced when designsystem module is complete).
- */
-@Composable
-fun Buttons(
-    onClick: () -> Unit
-) {
-    // Placeholder
 }
 

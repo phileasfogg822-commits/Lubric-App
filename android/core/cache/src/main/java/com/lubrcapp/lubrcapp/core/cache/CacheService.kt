@@ -21,13 +21,14 @@ class CacheService {
         cache[key] = CacheEntry(value, System.currentTimeMillis() + expiryMs)
     }
 
-    fun get(key: String): Any? {
-        val entry = cache[key] ?: return null
+    @Suppress("UNCHECKED_CAST")
+    fun <T> get(key: String): T? {
+        val entry = cache[key] as? CacheEntry<*> ?: return null
         if (System.currentTimeMillis() > entry.expiry) {
             cache.remove(key)
             return null
         }
-        return entry.value
+        return entry.value as? T
     }
 
     fun <T> getFlow(key: String, defaultValue: T): Flow<T> {
@@ -45,8 +46,11 @@ class CacheService {
 
     fun cleanup(expiryMs: Long = 3600000) {
         val now = System.currentTimeMillis()
-        if (now - lastCleanup > 3600000) {
-            cache.entries.removeIf { it.value as? CacheEntry ?: false }
+        if (now - lastCleanup > expiryMs) {
+            cache.entries.removeIf { entry ->
+                val cacheEntry = entry.value as? CacheEntry<*>
+                cacheEntry == null || now > cacheEntry.expiry
+            }
             lastCleanup = now
         }
     }

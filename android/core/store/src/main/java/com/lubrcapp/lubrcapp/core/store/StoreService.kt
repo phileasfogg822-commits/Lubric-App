@@ -1,8 +1,10 @@
 package com.lubrcapp.lubrcapp.core.store
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 
 /**
@@ -18,17 +20,17 @@ import kotlinx.coroutines.flow.stateIn
 abstract class StoreService<T : ViewModel> {
     protected abstract val repository: Repository
 
-    fun <R> getFlow(useCase: (T) -> kotlinx.coroutines.flow.Flow<R>): kotlinx.coroutines.flow.MutableStateFlow<R> {
-        return kotlinx.coroutines.flow.mutableStateFlow(useCase(this))
+    fun <R> getFlow(useCase: (T) -> Flow<R>): Flow<R> {
+        return useCase(this as T)
     }
 
     fun <R> getStateIn(
-        useCase: (T) -> kotlinx.coroutines.flow.Flow<R>,
-        scope: androidx.lifecycle.LifecycleOwner,
+        useCase: (T) -> Flow<R>,
+        scope: CoroutineScope,
         started: SharingStarted = SharingStarted.WhileSubscribed(5000),
         initialValue: R
-    ): kotlinx.coroutines.flow.StateFlow<R> {
-        return useCase(this).stateIn(scope, started, initialValue)
+    ): StateFlow<R> {
+        return useCase(this as T).stateIn(scope, started, initialValue)
     }
 }
 

@@ -43,7 +43,7 @@ android {
         compose = true
     }
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.4"
+        kotlinCompilerExtensionVersion = "1.5.10"
     }
     packaging {
         resources {
@@ -67,6 +67,7 @@ dependencies {
     implementation("androidx.core:core-ktx")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose")
+    implementation("androidx.activity:activity-compose:1.8.2")
     implementation("androidx.appcompat:appcompat")
     implementation("com.google.android.material:material")
     implementation("androidx.constraintlayout:constraintlayout")
@@ -102,6 +103,45 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+
+    implementation("androidx.compose.foundation:foundation")
+
+    // Project modules
+    implementation(project(":core:designsystem"))
+    implementation(project(":core:auth"))
+    implementation(project(":core:cache"))
+    implementation(project(":core:network"))
+    implementation(project(":core:permissions"))
+    implementation(project(":core:store"))
+    implementation(project(":core:sync"))
+    implementation(project(":core:ui"))
+
+    implementation(project(":domain:business"))
+    implementation(project(":domain:party"))
+    implementation(project(":domain:item"))
+    implementation(project(":domain:inventory"))
+    implementation(project(":domain:sales"))
+    implementation(project(":domain:purchase"))
+    implementation(project(":domain:payment"))
+    implementation(project(":domain:accounting"))
+    implementation(project(":domain:reporting"))
+    implementation(project(":domain:user"))
+
+    implementation(project(":feature:dashboard"))
+    implementation(project(":feature:accounts"))
+    implementation(project(":feature:inventory"))
+    implementation(project(":feature:sales"))
+    implementation(project(":feature:purchases"))
+    implementation(project(":feature:parties"))
+    implementation(project(":feature:items"))
+    implementation(project(":feature:settings"))
+    implementation(project(":feature:auth"))
+    implementation(project(":feature:syncstatus"))
+
+    implementation(project(":whitelist:config"))
+    implementation(project(":whitelist:branding"))
+    implementation(project(":whitelist:featureflags"))
+    implementation(project(":whitelist:tenant"))
 
     // Testing
     testImplementation("junit:junit:4.13.2")

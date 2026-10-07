@@ -23,7 +23,7 @@ class PermissionService(private val context: Context) {
     }
 
     fun requestPermission(
-        activity: androidx.activity.ComponentActivity,
+        activity: android.app.Activity,
         permission: String,
         requestCode: Int
     ) {
@@ -35,7 +35,7 @@ class PermissionService(private val context: Context) {
     }
 
     fun requestPermissions(
-        activity: androidx.activity.ComponentActivity,
+        activity: android.app.Activity,
         permissions: Array<out String>,
         requestCode: Int
     ) {
@@ -53,8 +53,16 @@ class PermissionService(private val context: Context) {
             hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
     fun hasNotificationPermission(): Boolean = hasPermission(Manifest.permission.POST_NOTIFICATIONS)
     fun hasBluetoothPermission(): Boolean = hasPermission(Manifest.permission.BLUETOOTH_CONNECT)
-    fun hasUsbPermission(): Boolean = hasPermission(Manifest.permission.USB_PERMISSION)
+
+    /**
+     * USB host communication is not gated by a runtime permission on Android;
+     * this checks whether USB host feature access is granted at install time.
+     */
+    fun hasUsbPermission(): Boolean = hasPermission(USB_PERMISSION)
 }
+
+/** Custom permission used for USB peripheral (printer/scanner) access. */
+const val USB_PERMISSION = "com.lubrcapp.lubrcapp.permission.USB_ACCESS"
 
 object PermissionCodes {
     const val CAMERA = 100
