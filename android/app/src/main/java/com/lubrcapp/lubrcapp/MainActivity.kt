@@ -10,7 +10,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.lubrcapp.lubrcapp.core.designsystem.LubrcappTheme
-import com.lubrcapp.lubrcapp.core.ui.MainNavigation
 import com.lubrcapp.lubrcapp.feature.auth.AuthViewModel
 
 class MainActivity : ComponentActivity() {
