@@ -119,8 +119,20 @@ export function buildPullUpsert(table: string, cols: string[]): { sql: string; p
   const keys = PULL_CONFLICT_KEYS[table] ?? ["uuid"];
   const placeholders = cols.map((_, i) => `$${i + 1}`);
   const rest = cols.filter((c) => !keys.includes(c));
+  // The trailing WHERE (1) is load-bearing, not decoration. The Android
+  // SQLite plugin's RETURNING detection scans backwards for the last ')'
+  // and then substring-searches the tail for "returning": without it, an
+  // upsert's last ')' is ON CONFLICT(uuid)'s, and the tail is the whole
+  // SET clause — which for products contains price_returning, so the
+  // plugin mistakes the column name for a RETURNING clause, truncates
+  // the statement to "... ON CONFLICT(uuid);", and compiling that dies
+  // with "near ';': syntax error" (reported 2026-10-31 on first sync).
+  // WHERE (1) puts the last ')' at the very end, so the tail is empty,
+  // the detection stays quiet, and the statement compiles whole. It is
+  // always true, so the upsert's meaning is unchanged, and it is valid
+  // SQLite on every driver (Capacitor, Tauri, node).
   const conflict = rest.length
-    ? `ON CONFLICT(${keys.join(", ")}) DO UPDATE SET ${rest.map((c) => `${c} = excluded.${c}`).join(", ")}`
+    ? `ON CONFLICT(${keys.join(", ")}) DO UPDATE SET ${rest.map((c) => `${c} = excluded.${c}`).join(", ")} WHERE (1)`
     : `ON CONFLICT(${keys.join(", ")}) DO NOTHING`;
   return {
     sql: `INSERT INTO ${table} (${cols.join(", ")}) VALUES (${placeholders.join(", ")}) ${conflict}`,
