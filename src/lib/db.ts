@@ -36,6 +36,21 @@ export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in (window as any);
 }
 
+/**
+ * True inside a Capacitor WebView (the phone shell). The Capacitor runtime
+ * injects window.Capacitor; a plain browser tab has none, so this never fires
+ * for the web/desktop build. Checked without importing @capacitor/core, so
+ * the web bundle is untouched by this branch.
+ */
+export function isCapacitor(): boolean {
+  try {
+    const c = (window as any)?.Capacitor;
+    return typeof window !== "undefined" && !!c && typeof c.isNativePlatform === "function" && c.isNativePlatform();
+  } catch {
+    return false;
+  }
+}
+
 export function getDbMode(): DbMode | null {
   return cachedMode;
 }
@@ -50,7 +65,7 @@ async function resolveMode(): Promise<DbMode> {
   if (cachedMode) return cachedMode;
   let stored: string | null = null;
   try { stored = localStorage.getItem("lubric_db_mode"); } catch { /* ignore */ }
-  cachedMode = stored === "local" || stored === "server" ? stored : (isTauri() ? "local" : "server");
+  cachedMode = stored === "local" || stored === "server" ? stored : (isCapacitor() ? "local" : (isTauri() ? "local" : "server"));
   return cachedMode;
 }
 
@@ -60,9 +75,16 @@ export async function getLocalDb(): Promise<any> {
 
 async function getLocal(): Promise<any> {
   if (!localConn) {
-    const mod: any = await import("@tauri-apps/plugin-sql");
-    const load = mod.load ?? mod.default?.load;
-    localConn = await load("sqlite:lubric.db");
+    if (isCapacitor()) {
+      // Phone shell: the Capacitor SQLite driver (see capDb.ts). The Tauri
+      // plugin does not exist in a WebView, so this branch must come first.
+      const cap: any = await import("./capDb");
+      localConn = await cap.openCapDb();
+    } else {
+      const mod: any = await import("@tauri-apps/plugin-sql");
+      const load = mod.load ?? mod.default?.load;
+      localConn = await load("sqlite:lubric.db");
+    }
   }
   await ensureLocalSchema(localConn);
   return localConn;

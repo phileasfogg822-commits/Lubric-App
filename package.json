@@ -16,6 +16,7 @@
     "icon": "node scripts/gen-icon.mjs"
   },
   "dependencies": {
+    "@capacitor-community/sqlite": "^6.0.2",
     "@hookform/resolvers": "^4.1.3",
     "@tanstack/react-query": "^5.75.0",
     "clsx": "^2.1.1",
