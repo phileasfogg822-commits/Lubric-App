@@ -1,0 +1,1 @@
+{"dependencies":{"@capacitor/android":"^6.2.0","@capacitor/core":"^6.2.0"},"description":"Capacitor wrapper that ships the Lubric-App main web app (Lubric POS) as an Android app","devDependencies":{"@capacitor/cli":"^6.2.0"},"name":"lubric-desktop-android","private":true,"scripts":{"sync":"npx cap sync android"},"version":"0.1.0"}

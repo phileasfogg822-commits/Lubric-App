@@ -1,0 +1,71 @@
+name: Desktop APK (Lubric POS)
+
+# Builds the Lubric-App main web app as an Android APK (Capacitor wrapper in
+# desktop-app/). The APK talks to the same VPS backend/database as the web
+# app: VITE_API_URL is baked in at build time, pointing at the VPS web
+# origin, which proxies /api to the same API and Postgres.
+on:
+  push:
+    branches: [apk/desktop-copy]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Root web app, built for Capacitor: relative base (the WebView serves
+      # from its local root) and the hub origin baked in as the API base.
+      - name: Build main web app for Capacitor
+        run: |
+          npm ci
+          npx tsc
+          VITE_API_URL=http://72.61.115.120:9001 npx vite build --base ./
+
+      # Same-database wiring check: the bundle must carry the hub origin,
+      # otherwise the APK would call https://localhost/api (which does not
+      # exist) instead of the VPS backend.
+      - name: Verify hub URL is baked into the bundle
+        run: |
+          grep -rl "72.61.115.120:9001" dist/assets/*.js | head -3
+          grep -c "72.61.115.120:9001" dist/assets/*.js | head -3
+
+      - name: Install wrapper deps
+        working-directory: desktop-app
+        run: npm ci || npm install
+
+      - name: Add Android platform + sync
+        working-directory: desktop-app
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      # The hub is plain http://, so cleartext must be allowed (same edit as
+      # the field app's workflow).
+      - name: Enable cleartext HTTP for the hub IP
+        working-directory: desktop-app
+        run: |
+          sed -i 's#android:usesCleartextTraffic="false"#android:usesCleartextTraffic="true"#' android/app/src/main/AndroidManifest.xml || true
+          grep -c "usesCleartextTraffic" android/app/src/main/AndroidManifest.xml || true
+
+      - name: Build debug APK
+        working-directory: desktop-app/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lubric-pos-apk
+          path: desktop-app/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
