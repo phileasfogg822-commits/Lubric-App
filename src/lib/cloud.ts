@@ -15,6 +15,10 @@ export function getCloudBase(): string | null {
   // freshly installed phone syncs without any manual Shop Settings step.
   // Desktop builds leave VITE_API_URL unset and keep the old behaviour
   // (null until the user enters a URL).
+  // NOTE: this is deliberately the bare origin, NOT origin + /api. The sync
+  // URLs are built as ${base}/api/v1/... in sync.ts, so an /api suffix here
+  // would double it. The /api suffix for data/auth calls lives in db.ts's
+  // apiBase() instead — the two bases are different on purpose.
   try {
     const env = import.meta.env.VITE_API_URL;
     if (env && String(env).trim()) return String(env).trim().replace(/\/+$/, "");

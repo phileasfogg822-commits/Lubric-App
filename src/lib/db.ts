@@ -2,7 +2,15 @@ import { pgToSqlite, ensureLocalSchema } from "./localDb";
 import { injectUuid } from "./outbox";
 import { SYNC_TABLES } from "./sync";
 
-const DEFAULT_API_BASE = import.meta.env.VITE_API_URL || '/api';
+const DEFAULT_API_BASE = import.meta.env.VITE_API_URL
+  // The baked URL is the web origin (e.g. http://host:9001); the API lives
+  // under /api on it. Appending it here — and NOT in the workflow — keeps
+  // one rule for every caller, and keeps cloud.ts's origin (sync adds its
+  // own /api/v1/...) correct. Without this suffix the APK called
+  // {origin}/auth/login and {origin}/query, which the web container
+  // answers 405 — so no APK build could ever sign in (found 2026-10-31).
+  ? import.meta.env.VITE_API_URL.replace(/\/+$/, "") + "/api"
+  : '/api';
 
 // In development, Vite proxies /api to the backend.
 // In production, set VITE_API_URL to the full backend URL.

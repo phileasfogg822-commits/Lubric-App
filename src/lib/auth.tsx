@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, ReactNode } from "react
 import { can, isAdminRole, parsePermissions } from "./permissions";
 // Aliased: the context exposes an `activeShopId` VALUE, and importing the
 // getter under the same name would shadow it inside the provider.
-import { setActiveShopId, activeShopId as readActiveShopId } from "./db";
+import { setActiveShopId, activeShopId as readActiveShopId, apiBase } from "./db";
 // Config/flag caches are keyed to WHO is asking (the pre-login fetch only
 // sees the branding subset and gets 401 on flags), so they are dropped at
 // every identity change.
@@ -23,7 +23,6 @@ export interface User {
 const STORAGE_KEY = "lubric_user";
 const TOKEN_KEY = "lubric_token";
 const SHOPS_KEY = "lubric_shops";
-const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
 /** An outlet this login may enter. Returned by /api/auth/login. */
 export interface Outlet {
@@ -122,7 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function login(email: string, password: string): Promise<boolean> {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/auth/login`, {
+      const res = await fetch(`${apiBase()}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
