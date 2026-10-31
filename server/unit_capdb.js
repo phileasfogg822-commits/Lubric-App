@@ -55,6 +55,18 @@ check('empty statements are dropped', () => {
   eq(prepareStatements(';; SELECT 1; ;'), ['SELECT 1']);
 });
 
+check('a CREATE TRIGGER body keeps its inner semicolons', () => {
+  const trigger = "CREATE TRIGGER IF NOT EXISTS trg_products_ins AFTER INSERT ON products WHEN NEW.uuid IS NOT NULL BEGIN INSERT INTO sync_outbox (table_name, row_uuid, op, payload) VALUES ('products', NEW.uuid, 'insert', json_object('uuid', NEW.uuid)); END;";
+  // The trailing ; is the statement separator, so the returned statement
+  // ends at END — but the inner ; survives, which is the whole point.
+  eq(prepareStatements(trigger), [trigger.slice(0, -1)]);
+});
+
+check('a trigger followed by another statement still splits between them', () => {
+  const trigger = "CREATE TRIGGER IF NOT EXISTS t AFTER INSERT ON t BEGIN INSERT INTO o (a) VALUES (1); END;";
+  eq(prepareStatements(trigger + ' SELECT 1;'), [trigger.slice(0, -1), 'SELECT 1']);
+});
+
 await checkAsync('select unwraps values and translates params', async () => {
   const calls = [];
   const fake = {

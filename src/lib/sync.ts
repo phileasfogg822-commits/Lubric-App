@@ -94,6 +94,35 @@ function setStatus(s: SyncStatus, err = "") {
   for (const fn of listeners) { try { fn(s, err); } catch { /* listener error */ } }
 }
 
+/**
+ * Conflict target for a pull upsert, per table. Most tables key on uuid,
+ * but three server tables have no uuid column at all (price_list_items,
+ * party_price_lists, party_prices) — ON CONFLICT(uuid) on those throws
+ * "no such column: uuid", aborts the whole pull, and leaves the cursor
+ * unsaved, so every later sync re-fails at the same table (caught
+ * 2026-10-31 by the customer-save simulation). Those three upsert on
+ * their natural keys instead, backed by UNIQUE indexes created in
+ * ensureLocalSchema. The same bug broke desktop sync past price_lists.
+ */
+export const PULL_CONFLICT_KEYS: Record<string, string[]> = {
+  price_list_items: ["price_list_id", "product_id"],
+  party_price_lists: ["party_type", "party_id", "price_list_id"],
+  party_prices: ["party_type", "party_id", "product_id"],
+};
+
+/** Build one pull upsert: INSERT ... ON CONFLICT(keys) DO UPDATE SET rest (or DO NOTHING when there is nothing but keys). */
+export function buildPullUpsert(table: string, cols: string[]): { sql: string; placeholders: string[] } {
+  const keys = PULL_CONFLICT_KEYS[table] ?? ["uuid"];
+  const placeholders = cols.map((_, i) => `$${i + 1}`);
+  const rest = cols.filter((c) => !keys.includes(c));
+  const conflict = rest.length
+    ? `ON CONFLICT(${keys.join(", ")}) DO UPDATE SET ${rest.map((c) => `${c} = excluded.${c}`).join(", ")}`
+    : `ON CONFLICT(${keys.join(", ")}) DO NOTHING`;
+  return {
+    sql: `INSERT INTO ${table} (${cols.join(", ")}) VALUES (${placeholders.join(", ")}) ${conflict}`,
+    placeholders,
+  };
+}
 /** One sync round: push outbox → pull changes. Returns row counts. */
 export async function syncNow(db: any): Promise<{ pushed: number; rejected: number; pulled: number }> {
   const base = getCloudBase();
@@ -147,16 +176,11 @@ export async function syncNow(db: any): Promise<{ pushed: number; rejected: numb
     for (const [table, rows] of Object.entries(data.changes ?? {}) as [string, any[]][]) {
       if (!(SYNC_TABLES as readonly string[]).includes(table) || !Array.isArray(rows)) continue;
       for (const row of rows) {
-        // Server id stays cloud-only; uuid is the local key.
+        // Server id stays cloud-only; uuid (or the natural key) is the local key.
         const cols = Object.keys(row).filter((c) => c !== "id");
         const vals = cols.map((c) => row[c]);
-        const placeholders = cols.map((_, i) => `$${i + 1}`);
-        const updateSet = cols.filter((c) => c !== "uuid").map((c) => `${c} = excluded.${c}`).join(", ");
-        await db.execute(
-          `INSERT INTO ${table} (${cols.join(", ")}) VALUES (${placeholders.join(", ")})
-           ON CONFLICT(uuid) DO UPDATE SET ${updateSet}`,
-          vals
-        );
+        const upsert = buildPullUpsert(table, cols);
+        await db.execute(upsert.sql, vals);
         pulled++;
       }
     }

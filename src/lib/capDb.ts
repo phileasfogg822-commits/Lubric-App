@@ -30,12 +30,27 @@ export interface CapSqliteConn {
 /**
  * Split SQL on top-level semicolons and rewrite $n placeholders to `?`.
  * Returns the non-empty statements, in order.
+ *
+ * Quote-aware (a `;` or `$` inside '...' or "..." is data, not syntax)
+ * AND trigger-aware: the `;` inside a CREATE TRIGGER ... BEGIN ... END
+ * block does not end the statement — only the `;` after END does. Without
+ * this, a trigger body is cut in half and SQLite reports "incomplete
+ * input" (caught 2026-10-31 by the customer-save simulation, before it
+ * could reach a phone).
  */
 export function prepareStatements(sql: string): string[] {
   const out: string[] = [];
   let cur = "";
   let single = false;
   let dbl = false;
+  let beginDepth = 0;
+  let word = "";
+  const flushWord = () => {
+    const w = word.toUpperCase();
+    if (w === "BEGIN") beginDepth++;
+    else if (w === "END" && beginDepth > 0) beginDepth--;
+    word = "";
+  };
   for (let i = 0; i < sql.length; i++) {
     const ch = sql[i];
     if (single) {
@@ -52,6 +67,8 @@ export function prepareStatements(sql: string): string[] {
       }
       continue;
     }
+    if (/[A-Za-z]/.test(ch)) { word += ch; cur += ch; continue; }
+    flushWord();
     if (ch === "'") { single = true; cur += ch; continue; }
     if (ch === '"') { dbl = true; cur += ch; continue; }
     if (ch === "$" && /[0-9]/.test(sql[i + 1] ?? "")) {
@@ -60,13 +77,14 @@ export function prepareStatements(sql: string): string[] {
       cur += "?";
       continue;
     }
-    if (ch === ";") {
+    if (ch === ";" && beginDepth === 0) {
       if (cur.trim()) out.push(cur.trim());
       cur = "";
       continue;
     }
     cur += ch;
   }
+  flushWord();
   if (cur.trim()) out.push(cur.trim());
   return out;
 }

@@ -524,6 +524,12 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       ]) {
         await db.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_${t}_uuid ON ${t}(uuid)`);
       }
+      // The three server tables without a uuid column upsert on natural
+      // keys instead (see PULL_CONFLICT_KEYS in sync.ts); those keys need
+      // UNIQUE indexes or the upsert has nothing to conflict on.
+      await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_price_list_items_natural ON price_list_items(price_list_id, product_id)");
+      await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_party_price_lists_natural ON party_price_lists(party_type, party_id, price_list_id)");
+      await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_party_prices_natural ON party_prices(party_type, party_id, product_id)");
       // Outbox tables, then the triggers that fill them. The triggers are
       // created here (not only in syncNow) so a crash mid-pull — which drops
       // them — still leaves them restored on the next launch.
