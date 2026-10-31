@@ -12,6 +12,17 @@ export interface CustomerGroup {
 }
 
 /**
+ * Stable empty context. This MUST be a single shared object, not a fresh
+ * literal per render: POS's re-price effect depends on the context object,
+ * and a new identity every render re-runs that effect, which sets cart state
+ * (repriceAll always returns a new array) and re-renders — an infinite loop
+ * (~5,000 renders/second) that starves route changes, so after POS mounts the
+ * URL changes but the view never leaves POS until a full reload.
+ */
+const EMPTY_CTX: PriceSource & { group?: CustomerGroup | null } = {
+  priceListId: null, listItems: [], groupListItems: [], partyPrices: {}, group: null,
+};
+/**
  * Everything that decides what a CUSTOMER pays, and what they may owe.
  *
  * Deliberately four small queries rather than one wide join. A join of
@@ -109,5 +120,6 @@ export function usePriceContext(customerId: number | null): PriceSource & { grou
   // An empty object until the query lands, so the first render of a freshly
   // chosen customer prices from the tier columns and then re-renders with the
   // group - rather than reading `undefined` and throwing mid-bill.
-  return data ?? { priceListId: null, listItems: [], groupListItems: [], partyPrices: {}, group: null };
+  // Shared EMPTY_CTX (not a fresh literal): see the note above it.
+  return data ?? EMPTY_CTX;
 }
