@@ -15,6 +15,10 @@ export default function Customers() {
   const [show, setShow] = useState(false);
   const [editId, setEditId] = useState<number|null>(null);
   const [form, setForm] = useState({ name: "", phone: "", customer_type: "returning" });
+  // Vehicle captured with the customer, so the sale screen can pick it up
+  // instead of the user retyping it at the counter (requested 2026-10-31).
+  // Same shape as the sale's SaleVehicle; empty registration = no vehicle.
+  const [vehicle, setVehicle] = useState({ registration: "", make: "", model: "", modelYear: "", color: "", condition: "" });
   const [followUpFor, setFollowUpFor] = useState<ReminderDraft | null>(null);
   const [showFollowUp, setShowFollowUp] = useState(false);
 
@@ -40,12 +44,30 @@ export default function Customers() {
       return dbSelect<any>(sql + " ORDER BY name", p);
     },
   });
-  function openAdd() { setEditId(null); setForm({ name: "", phone: "", customer_type: "returning" }); setShow(true); }
-  function openEdit(c: any) { setEditId(c.id); setForm({ name: c.name, phone: c.phone ?? "", customer_type: c.customer_type ?? "returning" }); setShow(true); }
+  function openAdd() { setEditId(null); setForm({ name: "", phone: "", customer_type: "returning" }); setVehicle({ registration: "", make: "", model: "", modelYear: "", color: "", condition: "" }); setShow(true); }
+  function openEdit(c: any) { setEditId(c.id); setForm({ name: c.name, phone: c.phone ?? "", customer_type: c.customer_type ?? "returning" }); setVehicle({ registration: "", make: "", model: "", modelYear: "", color: "", condition: "" }); setShow(true); }
   const save = useMutation({
     mutationFn: async () => {
+      let customerId: number | null = editId;
       if (editId) await dbExecute("UPDATE customers SET name=$1, phone=$2, customer_type=$3 WHERE id=$4", [form.name, form.phone, form.customer_type, editId]);
-      else await dbExecute("INSERT INTO customers (name, phone, customer_type, credit_balance) VALUES ($1, $2, $3, 0)", [form.name, form.phone, form.customer_type]);
+      else {
+        const r = await dbExecute("INSERT INTO customers (name, phone, customer_type, credit_balance) VALUES ($1, $2, $3, 0) RETURNING id", [form.name, form.phone, form.customer_type]);
+        customerId = (r.rows?.[0] as { id?: number } | undefined)?.id ?? null;
+      }
+      // Vehicle upsert, mirroring the sale's own logic: one row per plate
+      // per customer, newest wins at the sale screen. Kept out of the
+      // customer write's failure path: a vehicle failure must not undo
+      // a saved customer, it just warns.
+      const reg = vehicle.registration.trim();
+      if (reg && customerId) {
+        try {
+          const found = await dbSelect<any>("SELECT id FROM vehicles WHERE customer_id = $1 AND LOWER(registration) = LOWER($2) LIMIT 1", [customerId, reg]);
+          if (found.length) await dbExecute("UPDATE vehicles SET make=$1, model=$2, model_year=$3, color=$4, condition=$5 WHERE id=$6", [vehicle.make.trim(), vehicle.model.trim(), vehicle.modelYear.trim(), vehicle.color.trim(), vehicle.condition.trim(), found[0].id]);
+          else await dbExecute("INSERT INTO vehicles (customer_id, registration, make, model, model_year, color, condition) VALUES ($1, $2, $3, $4, $5, $6, $7)", [customerId, reg, vehicle.make.trim(), vehicle.model.trim(), vehicle.modelYear.trim(), vehicle.color.trim(), vehicle.condition.trim()]);
+        } catch (e: any) {
+          alert("Customer saved, but the vehicle could not be saved: " + (e?.message || e));
+        }
+      }
     },
     onSuccess: () => { qc.invalidateQueries(); setShow(false); },
     onError: (e: any) => { alert("Error saving customer: " + (e?.message || e)); console.error(e); },
@@ -98,6 +120,16 @@ export default function Customers() {
                 <option value="walking">Walking</option><option value="returning">Returning</option><option value="wholesale">Wholesale</option>
               </select>
             </FormField>
+            <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 8 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Vehicle (optional)</div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 8 }}>Saved with the customer, so the sale screen can pick it up without retyping it.</div>
+              <FormField label="Registration (plate)"><input className="input" value={vehicle.registration} onChange={e => setVehicle({ ...vehicle, registration: e.target.value })} /></FormField>
+              <FormField label="Make"><input className="input" value={vehicle.make} onChange={e => setVehicle({ ...vehicle, make: e.target.value })} /></FormField>
+              <FormField label="Model"><input className="input" value={vehicle.model} onChange={e => setVehicle({ ...vehicle, model: e.target.value })} /></FormField>
+              <FormField label="Model year"><input className="input" value={vehicle.modelYear} onChange={e => setVehicle({ ...vehicle, modelYear: e.target.value })} /></FormField>
+              <FormField label="Color"><input className="input" value={vehicle.color} onChange={e => setVehicle({ ...vehicle, color: e.target.value })} /></FormField>
+              <FormField label="Condition"><input className="input" value={vehicle.condition} onChange={e => setVehicle({ ...vehicle, condition: e.target.value })} /></FormField>
+            </div>
             <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
               <button className="btn btn-primary" onClick={() => save.mutate()} disabled={!form.name}>{editId ? "Save Changes" : "Add Customer"}</button>
               <button className="btn btn-ghost" onClick={() => setShow(false)}>Cancel</button>

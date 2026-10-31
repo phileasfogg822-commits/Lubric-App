@@ -353,9 +353,13 @@ export default function POS() {
     if (!q) { setVehicleSuggestions([]); return; }
     const timer = setTimeout(async () => {
       try {
+        // Portable equivalent of DISTINCT ON (LOWER(registration)): one row
+        // per plate, the newest match. DISTINCT ON is PostgreSQL-only, so on
+        // the phone this query threw (caught above, suggestions silently
+        // empty). The correlated MAX keeps the same winner among matches.
         const rows = await dbSelect<any>(
-          "SELECT DISTINCT ON (LOWER(registration)) registration, make, model, model_year, color, \"condition\" FROM vehicles WHERE registration <> '' AND (LOWER(registration) LIKE $1 OR LOWER(make) LIKE $1 OR LOWER(model) LIKE $1) ORDER BY LOWER(registration), id DESC LIMIT 8",
-          [`%${q.toLowerCase()}%`]
+          "SELECT registration, make, model, model_year, color, \"condition\" FROM vehicles v WHERE registration <> '' AND (LOWER(registration) LIKE $1 OR LOWER(make) LIKE $1 OR LOWER(model) LIKE $1) AND v.id = (SELECT MAX(v2.id) FROM vehicles v2 WHERE LOWER(v2.registration) = LOWER(v.registration) AND (LOWER(v2.registration) LIKE $2 OR LOWER(v2.make) LIKE $2 OR LOWER(v2.model) LIKE $2)) ORDER BY LOWER(registration) LIMIT 8",
+          [`%${q.toLowerCase()}%`, `%${q.toLowerCase()}%`]
         );
         setVehicleSuggestions(rows);
       } catch (e) {

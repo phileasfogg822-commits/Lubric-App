@@ -139,6 +139,13 @@ export function pgToSqlite(sql: string): string {
     .replace(/\bdate_trunc\(\s*'month'\s*,\s*([^)]+?)\s*\)/gi, "date($1, 'start of month')")
     .replace(/\bdate_trunc\(\s*'week'\s*,\s*([^)]+?)\s*\)/gi, "date($1, 'weekday 0', '-6 days')")
     .replace(/\bNOW\(\s*\)/gi, "datetime('now')")
+    // nextval(pg_get_serial_sequence('table', 'col')) — SQLite has no
+    // sequences. The single-device local DB takes max(col)+1 instead.
+    // completeSale reserves the order id up front with exactly this call;
+    // without the translation the phone sale died with "no such function:
+    // pg_get_serial_sequence" (reported 2026-10-31). A gap is possible if
+    // a sale is deleted, but ids are never reused by the app itself.
+    .replace(/\bnextval\s*\(\s*pg_get_serial_sequence\s*\(\s*'([^']+)'\s*,\s*'([^']+)'\s*\)\s*\)/gi, "(SELECT COALESCE(MAX($2), 0) + 1 FROM $1)")
     .replace(/\bILIKE\b/gi, "LIKE")
     .replace(/\bTRUE\b/gi, "1")
     .replace(/\bFALSE\b/gi, "0");
@@ -393,6 +400,13 @@ CREATE INDEX IF NOT EXISTS idx_stock_levels_product ON stock_levels(product_id);
  * replicate; the other tables are left for the day local sync is switched on.
  */
 const SYNC_COLUMN_PATCHES: { table: string; column: string; decl: string }[] = [
+  // Master lists (added 2026-10-31 with the sync coverage): the base schema
+  // has no uuid/updated_at for these, and the pull upserts on uuid, so both
+  // are needed before the first categories/brands pull can land.
+  { table: "categories", column: "uuid", decl: "TEXT" },
+  { table: "categories", column: "updated_at", decl: "TEXT" },
+  { table: "brands", column: "uuid", decl: "TEXT" },
+  { table: "brands", column: "updated_at", decl: "TEXT" },
   { table: "vendor_payables", column: "uuid", decl: "TEXT" },
   { table: "vendor_payables", column: "shop_id", decl: "INTEGER DEFAULT 1" },
   { table: "vendor_payables", column: "updated_at", decl: "TEXT" },
@@ -511,6 +525,8 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       for (const t of [
         "account_transactions",
         "accounts",
+        "categories",
+        "brands",
         "customers",
         "expenses",
         "inspections",

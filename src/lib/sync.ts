@@ -17,6 +17,10 @@ import { ensureOutboxTriggers, dropOutboxTriggers } from "./outbox.ts";
 /** Tables the agent replicates (mirrors SYNC_TABLES in server/index.js). */
 export const SYNC_TABLES = [
   "products", "services", "customers", "vehicles", "vendors",
+  // Master lists for the product form (added 2026-10-31): without these the
+  // phone's category/brand dropdowns stay empty forever — the tables exist
+  // locally but nothing ever replicates into them.
+  "categories", "brands",
   "orders", "order_items", "expenses", "accounts", "account_transactions",
   "purchase_orders", "vendor_payables", "reminders", "inspections",
   "cash_movements", "reservations",

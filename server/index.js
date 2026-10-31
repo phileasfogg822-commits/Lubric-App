@@ -467,6 +467,13 @@ const SYNC_TABLES = {
   customers:   { softDelete: true },
   vehicles:    { softDelete: true },
   vendors:     { softDelete: true },
+  // Master lists for the product form (added 2026-10-31): without these the
+  // phone's category/brand dropdowns stay empty forever — the tables exist
+  // locally but nothing ever replicates into them. No softDelete: no
+  // deleted_at column is known for these tables, and the app has no delete
+  // UI for them, so a delete is rejected rather than breaking the pull.
+  categories:  {},
+  brands:      {},
   orders:      {},
   order_items: {},
   expenses:    { softDelete: true },

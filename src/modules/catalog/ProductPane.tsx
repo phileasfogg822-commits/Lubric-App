@@ -37,6 +37,34 @@ export default function ProductPane({ view, density, columns, search, compact, o
   const { data: categories } = useQuery({ queryKey: ["categories"], queryFn: () => dbSelect<any>("SELECT id, name FROM categories ORDER BY name") });
   const { data: brands } = useQuery({ queryKey: ["brands"], queryFn: () => dbSelect<any>("SELECT id, name FROM brands ORDER BY name") });
   const { data: vendors } = useQuery({ queryKey: ["vendors_list"], queryFn: () => dbSelect<any>("SELECT id, name FROM vendors ORDER BY name") });
+  const [newCategory, setNewCategory] = useState("");
+  const [newBrand, setNewBrand] = useState("");
+
+  // Inline master-list creation (added 2026-10-31): there was no screen at
+  // all that could add a category or brand, so the product form's dropdowns
+  // stayed empty on a fresh phone. Typing a name here creates it and
+  // selects it at once; an existing name (case-insensitive) is reused
+  // instead of duplicated. On the phone the row queues for sync; it lands
+  // on the server once the server's sync list includes these tables (the
+  // repo change ships with this, the live server picks it up on redeploy).
+  async function addList(table: "categories" | "brands", name: string, key: "categories" | "brands", setFormKey: "category_id" | "brand_id", clear: () => void) {
+    const nm = name.trim();
+    if (!nm) return;
+    try {
+      const existing = await dbSelect<any>(`SELECT id FROM ${table} WHERE LOWER(name) = LOWER($1) LIMIT 1`, [nm]);
+      if (existing.length) {
+        setForm(f => ({ ...f, [setFormKey]: String(existing[0].id) }));
+      } else {
+        const r = await dbExecute(`INSERT INTO ${table} (name) VALUES ($1) RETURNING id`, [nm]);
+        const id = (r.rows?.[0] as { id?: number } | undefined)?.id;
+        if (id != null) setForm(f => ({ ...f, [setFormKey]: String(id) }));
+      }
+      await qc.invalidateQueries({ queryKey: [key] });
+      clear();
+    } catch (e: any) {
+      alert(`Could not add ${table.slice(0, -1)}: ` + (e?.message || e));
+    }
+  }
 
   const { data: rows, isLoading } = useQuery({
     queryKey: ["catalog_products", search],
@@ -189,6 +217,10 @@ export default function ProductPane({ view, density, columns, search, compact, o
                 <option value="">—</option>
                 {brands?.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                <input className="input" placeholder="New company name" value={newBrand} onChange={(e) => setNewBrand(e.target.value)} />
+                <button className="btn btn-ghost" onClick={() => addList("brands", newBrand, "brands", "brand_id", () => setNewBrand(""))} disabled={!newBrand.trim()}>Add</button>
+              </div>
             </FormField>
             <FormField label="Supplier">
               <select className="input" value={form.vendor_id} onChange={(e) => setForm({ ...form, vendor_id: e.target.value })}>
@@ -201,6 +233,10 @@ export default function ProductPane({ view, density, columns, search, compact, o
                 <option value="">—</option>
                 {categories?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                <input className="input" placeholder="New category name" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} />
+                <button className="btn btn-ghost" onClick={() => addList("categories", newCategory, "categories", "category_id", () => setNewCategory(""))} disabled={!newCategory.trim()}>Add</button>
+              </div>
             </FormField>
             <FormField label="Unit"><input className="input" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} /></FormField>
             <FormField label="Variant"><input className="input" value={form.variant} onChange={(e) => setForm({ ...form, variant: e.target.value })} /></FormField>
