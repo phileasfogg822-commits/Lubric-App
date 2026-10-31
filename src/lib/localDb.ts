@@ -7,6 +7,13 @@
  * VPS is handled separately by src/lib/sync.ts.
  */
 
+import { SYNC_TABLES, ensureOutbox } from "./sync.ts";
+import { ensureOutboxTriggers } from "./outbox.ts";
+// NOTE: the .ts extensions above are deliberate. The repo's node-based tests
+// import this module directly (see server/e2e_ledger_sqlite.js), and node ESM
+// cannot resolve extensionless imports — dropping the extensions breaks
+// those tests. Vite and tsc (allowImportingTsExtensions) accept them.
+
 // Consolidated local schema, part 1 of 2 (SQLite dialect).
 export const LOCAL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS shops (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT DEFAULT 'Zafar Lubricants', address TEXT DEFAULT '', phone TEXT DEFAULT '', currency TEXT DEFAULT 'PKR', language TEXT DEFAULT 'en', used_oil_drum_capacity REAL DEFAULT 200, manual_price_allowed INTEGER DEFAULT 0, wholesale_mode TEXT DEFAULT 'auto', created_at TEXT DEFAULT (datetime('now')));
@@ -412,6 +419,53 @@ const SYNC_COLUMN_PATCHES: { table: string; column: string; decl: string }[] = [
   // stock_movements grows the location dimension (migration 033).
   { table: "stock_movements", column: "warehouse_id", decl: "INTEGER" },
   { table: "stock_movements", column: "location_id", decl: "INTEGER" },
+  // Phase 3.2 — every server column the pull sends but the local table
+  // lacks. The pull inserts EVERY server column except id, so one missing
+  // column throws "no such column" and takes the whole pull down. Measured
+  // 2026-10-31 by diffing information_schema on the live database against
+  // PRAGMA table_info after ensureLocalSchema (41 gaps, 13 tables).
+  // Types are SQLite equivalents of the Postgres types.
+  { table: "account_transactions", column: "uuid", decl: "TEXT" },
+  { table: "account_transactions", column: "updated_at", decl: "TEXT" },
+  { table: "account_transactions", column: "shop_id", decl: "INTEGER DEFAULT 1" },
+  { table: "accounts", column: "uuid", decl: "TEXT" },
+  { table: "accounts", column: "updated_at", decl: "TEXT" },
+  { table: "accounts", column: "account_class", decl: "TEXT" },
+  { table: "accounts", column: "code", decl: "TEXT" },
+  { table: "customers", column: "uuid", decl: "TEXT" },
+  { table: "customers", column: "updated_at", decl: "TEXT" },
+  { table: "customers", column: "deleted_at", decl: "TEXT" },
+  { table: "expenses", column: "uuid", decl: "TEXT" },
+  { table: "expenses", column: "updated_at", decl: "TEXT" },
+  { table: "expenses", column: "deleted_at", decl: "TEXT" },
+  { table: "inspections", column: "order_id", decl: "INTEGER" },
+  { table: "inspections", column: "inspection_data", decl: "TEXT" },
+  { table: "inspections", column: "uuid", decl: "TEXT" },
+  { table: "inspections", column: "updated_at", decl: "TEXT" },
+  { table: "orders", column: "uuid", decl: "TEXT" },
+  { table: "orders", column: "updated_at", decl: "TEXT" },
+  { table: "orders", column: "converted_from_commitment_id", decl: "INTEGER" },
+  { table: "products", column: "vendor_id", decl: "INTEGER" },
+  { table: "products", column: "received_date", decl: "TEXT" },
+  { table: "products", column: "uuid", decl: "TEXT" },
+  { table: "products", column: "updated_at", decl: "TEXT" },
+  { table: "products", column: "deleted_at", decl: "TEXT" },
+  { table: "purchase_orders", column: "uuid", decl: "TEXT" },
+  { table: "purchase_orders", column: "updated_at", decl: "TEXT" },
+  { table: "reminders", column: "uuid", decl: "TEXT" },
+  { table: "reservations", column: "taken_by_name", decl: "TEXT" },
+  { table: "services", column: "uuid", decl: "TEXT" },
+  { table: "services", column: "updated_at", decl: "TEXT" },
+  { table: "services", column: "deleted_at", decl: "TEXT" },
+  { table: "vehicles", column: "service_interval_days", decl: "INTEGER" },
+  { table: "vehicles", column: "service_interval_km", decl: "INTEGER" },
+  { table: "vehicles", column: "uuid", decl: "TEXT" },
+  { table: "vehicles", column: "updated_at", decl: "TEXT" },
+  { table: "vehicles", column: "deleted_at", decl: "TEXT" },
+  { table: "vehicles", column: "shop_id", decl: "INTEGER DEFAULT 1" },
+  { table: "vendors", column: "uuid", decl: "TEXT" },
+  { table: "vendors", column: "updated_at", decl: "TEXT" },
+  { table: "vendors", column: "deleted_at", decl: "TEXT" },
 ];
 
 async function patchSyncColumns(db: { select: (s: string) => Promise<unknown>; execute: (s: string) => Promise<unknown> }): Promise<void> {
@@ -452,6 +506,29 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       await db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_order_items_uuid ON order_items(uuid)"
       );
+      // Phase 3.2: the tables that gained a uuid column above need the same
+      // UNIQUE index, or their pull upserts can never match an existing row.
+      for (const t of [
+        "account_transactions",
+        "accounts",
+        "customers",
+        "expenses",
+        "inspections",
+        "orders",
+        "products",
+        "purchase_orders",
+        "reminders",
+        "services",
+        "vehicles",
+        "vendors",
+      ]) {
+        await db.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_${t}_uuid ON ${t}(uuid)`);
+      }
+      // Outbox tables, then the triggers that fill them. The triggers are
+      // created here (not only in syncNow) so a crash mid-pull — which drops
+      // them — still leaves them restored on the next launch.
+      await ensureOutbox(db);
+      await ensureOutboxTriggers(db, SYNC_TABLES);
     })().catch((e) => {
       schemaReady = null; // allow retry on next query
       throw e;

@@ -3,6 +3,8 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth, AuthProvider } from "./lib/auth";
 import { isAdminRole } from "./lib/permissions";
 import { useConfigMap, useFlagRows, useBranding } from "./lib/useConfigFlags";
+import { isCapacitor, getLocalDb } from "./lib/db";
+import { startSyncLoop } from "./lib/sync";
 import { moduleEnabled, pickFlag } from "./lib/configRules";
 import Layout from "./components/Layout";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -104,11 +106,31 @@ function RedirectIfAuth({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * Phase 3.2: the phone's background sync. Starts once at app launch when
+ * running in Capacitor; the loop itself no-ops each tick until a cloud URL
+ * and a device token exist, so pairing later (Shop Settings) picks it up
+ * with no restart. Web and Tauri builds never start it — their sync stays
+ * manual, exactly as before.
+ */
+function SyncLoop() {
+  useEffect(() => {
+    if (!isCapacitor()) return;
+    let cancelled = false;
+    getLocalDb()
+      .then((db) => { if (!cancelled) startSyncLoop(() => Promise.resolve(db)); })
+      .catch(() => { /* the sync status UI reports; a failed open retries on next launch */ });
+    return () => { cancelled = true; };
+  }, []);
+  return null;
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <ErrorBoundary>
         <Branding />
+        <SyncLoop />
         <Routes>
           <Route path="/login" element={<RedirectIfAuth><Login /></RedirectIfAuth>} />
 

@@ -11,7 +11,8 @@
  *  - Editable entities use last-writer-wins by updated_at.
  */
 
-import { getDeviceToken, getCloudBase, setDeviceToken } from "./cloud";
+import { getDeviceToken, getCloudBase, setDeviceToken } from "./cloud.ts";
+import { ensureOutboxTriggers, dropOutboxTriggers } from "./outbox.ts";
 
 /** Tables the agent replicates (mirrors SYNC_TABLES in server/index.js). */
 export const SYNC_TABLES = [
@@ -63,7 +64,7 @@ INSERT OR IGNORE INTO sync_state (key, value) VALUES ('pull_cursor', '0');
 `;
 
 let schemaReady: Promise<void> | null = null;
-function ensureOutbox(db: any): Promise<void> {
+export function ensureOutbox(db: any): Promise<void> {
   if (!schemaReady) {
     const p: Promise<void> = db.execute(OUTBOX_SCHEMA).catch((e: unknown) => { schemaReady = null; throw e; });
     schemaReady = p;
@@ -132,6 +133,12 @@ export async function syncNow(db: any): Promise<{ pushed: number; rejected: numb
     }
 
     // ── pull ─────────────────────────────────────────────────────
+    // The outbox triggers must be down while pulled rows land, or every
+    // downloaded row queues straight back up for the next push (an echo
+    // loop: push applies it, pull re-sends it, trigger re-queues it).
+    // They come back in the finally below, and schema init recreates them
+    // on the next launch even if this process dies mid-pull.
+    await dropOutboxTriggers(db, SYNC_TABLES);
     const state = await db.select("SELECT value FROM sync_state WHERE key = 'pull_cursor'");
     const cursor = Number(state[0]?.value ?? 0);
     const res = await fetch(`${base}/api/v1/pull?since=${cursor}`, { headers: authHeaders() });
@@ -158,6 +165,11 @@ export async function syncNow(db: any): Promise<{ pushed: number; rejected: numb
   } catch (e: any) {
     setStatus("error", e?.message ?? String(e));
     throw e;
+  } finally {
+    // Restore the outbox triggers whatever the pull did. Idempotent
+    // (CREATE TRIGGER IF NOT EXISTS), so re-running after a push-only
+    // failure is a harmless no-op.
+    try { await ensureOutboxTriggers(db, SYNC_TABLES); } catch { /* schema init retries on next launch */ }
   }
   return { pushed, rejected, pulled };
 }

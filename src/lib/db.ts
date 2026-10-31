@@ -1,4 +1,6 @@
 import { pgToSqlite, ensureLocalSchema } from "./localDb";
+import { injectUuid } from "./outbox";
+import { SYNC_TABLES } from "./sync";
 
 const DEFAULT_API_BASE = import.meta.env.VITE_API_URL || '/api';
 
@@ -160,13 +162,20 @@ export async function dbSelect<T>(sql: string, params: unknown[] = []): Promise<
 export async function dbExecute(sql: string, params: unknown[] = []): Promise<{ rowCount: number; rows: unknown[] }> {
   if (await resolveMode() === "local") {
     const db: any = await getLocal();
+    // A local INSERT into a replicated table needs a uuid, or the outbox
+    // trigger skips it and the row never syncs. Injected before the
+    // Postgres→SQLite translation; the appended ? is last, so positional
+    // params stay aligned on both the Tauri and Capacitor drivers.
+    const inj = injectUuid(sql, params, SYNC_TABLES);
+    const finalSql = inj ? inj.sql : sql;
+    const finalParams = inj ? inj.params : params;
     // RETURNING rows are fetched via select(); the plugin's execute() only
     // reports affected-row counts.
-    if (/\breturning\b/i.test(sql)) {
-      const rows = await db.select(pgToSqlite(sql), params);
+    if (/\breturning\b/i.test(finalSql)) {
+      const rows = await db.select(pgToSqlite(finalSql), finalParams);
       return { rowCount: rows.length, rows };
     }
-    const r = await db.execute(pgToSqlite(sql), params);
+    const r = await db.execute(pgToSqlite(finalSql), finalParams);
     return { rowCount: r.rowsAffected ?? 0, rows: [] };
   }
   const res = await fetch(`${apiBase()}/execute`, {
@@ -197,11 +206,14 @@ export async function dbTransaction(
     try {
       for (const st of statements) {
         const p = st.params ?? [];
-        if (/\breturning\b/i.test(st.sql)) {
-          const rows = await db.select(pgToSqlite(st.sql), p);
+        const inj = injectUuid(st.sql, p, SYNC_TABLES);
+        const s = inj ? inj.sql : st.sql;
+        const pp = inj ? inj.params : p;
+        if (/\breturning\b/i.test(s)) {
+          const rows = await db.select(pgToSqlite(s), pp);
           results.push({ rowCount: rows.length, rows });
         } else {
-          const r = await db.execute(pgToSqlite(st.sql), p);
+          const r = await db.execute(pgToSqlite(s), pp);
           results.push({ rowCount: r.rowsAffected ?? 0, rows: [] });
         }
       }
