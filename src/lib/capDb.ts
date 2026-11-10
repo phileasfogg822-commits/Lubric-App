@@ -89,6 +89,26 @@ export function prepareStatements(sql: string): string[] {
   return out;
 }
 
+/**
+ * Normalize one bound value for the plugin's binder. The Android plugin
+ * binds through androidx SimpleSQLiteQuery, which only accepts null,
+ * String, Number and byte[] — a JS boolean or a JSON object/array has no
+ * binding and the statement dies with "Run: ..." (caught 2026-11-10 on
+ * the tablet's first sync: the pull carries order_items booleans
+ * leftover_released/billed_by_capacity and inspections.inspection_data,
+ * a JSONB object, so every sync failed at the first such row and the
+ * cursor was never saved). SQLite stores booleans as 0/1 integers anyway
+ * — the local schema declares those columns INTEGER, and the read side
+ * already treats them as boolean|number (priceMemory.ts) — and JSON
+ * values belong in TEXT columns as strings, so normalizing here loses
+ * nothing: true/false become 1/0, objects/arrays become their JSON text.
+ */
+export function normalizeBindValue(v: unknown): unknown {
+  if (typeof v === "boolean") return v ? 1 : 0;
+  if (v !== null && typeof v === "object") return JSON.stringify(v);
+  return v;
+}
+
 export interface LocalDbHandle {
   select: (sql: string, params?: unknown[]) => Promise<unknown[]>;
   execute: (sql: string, params?: unknown[]) => Promise<{ rowsAffected: number; rows: unknown[] }>;
@@ -98,14 +118,15 @@ export function createCapDb(conn: CapSqliteConn): LocalDbHandle {
   return {
     async select(sql: string, params: unknown[] = []): Promise<unknown[]> {
       const stmts = prepareStatements(sql);
-      const res = await conn.query(stmts[0], params);
+      const res = await conn.query(stmts[0], params.map(normalizeBindValue));
       return (res.values ?? []) as unknown[];
     },
     async execute(sql: string, params: unknown[] = []): Promise<{ rowsAffected: number; rows: unknown[] }> {
       const stmts = prepareStatements(sql);
+      const values = params.map(normalizeBindValue);
       let affected = 0;
       if (stmts.length === 1) {
-        const r = await conn.run(stmts[0], params);
+        const r = await conn.run(stmts[0], values);
         affected = r.changes?.changes ?? 0;
       } else {
         // Schema/DDL blocks carry no params; run each statement in order.

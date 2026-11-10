@@ -10,7 +10,7 @@
  * Run:  node --experimental-strip-types server/unit_capdb.js
  */
 
-import { prepareStatements, createCapDb } from '../src/lib/capDb.ts';
+import { prepareStatements, createCapDb, normalizeBindValue } from '../src/lib/capDb.ts';
 
 let ok = 0, total = 0;
 function check(title, fn) {
@@ -67,6 +67,23 @@ check('a trigger followed by another statement still splits between them', () =>
   eq(prepareStatements(trigger + ' SELECT 1;'), [trigger.slice(0, -1), 'SELECT 1']);
 });
 
+check('booleans normalize to 0/1 for the plugin binder', () => {
+  eq(normalizeBindValue(true), 1);
+  eq(normalizeBindValue(false), 0);
+});
+
+check('objects and arrays normalize to their JSON text', () => {
+  eq(normalizeBindValue({ chain: 'worn', tyres: 'low' }), '{"chain":"worn","tyres":"low"}');
+  eq(normalizeBindValue(['pos', 'sales_history']), '["pos","sales_history"]');
+});
+
+check('strings, numbers and null pass through untouched', () => {
+  eq(normalizeBindValue('Zafar'), 'Zafar');
+  eq(normalizeBindValue(42), 42);
+  eq(normalizeBindValue(1.5), 1.5);
+  eq(normalizeBindValue(null), null);
+});
+
 await checkAsync('select unwraps values and translates params', async () => {
   const calls = [];
   const fake = {
@@ -100,6 +117,41 @@ await checkAsync('multi-statement execute runs each statement with no params', a
   const db = createCapDb(fake);
   await db.execute('CREATE TABLE IF NOT EXISTS a (id INTEGER); CREATE TABLE IF NOT EXISTS b (id INTEGER);');
   eq(calls, [['CREATE TABLE IF NOT EXISTS a (id INTEGER)', []], ['CREATE TABLE IF NOT EXISTS b (id INTEGER)', []]]);
+});
+
+await checkAsync('a pull-like upsert reaches the plugin with only bindable values', async () => {
+  // Regression test for the 2026-11-10 tablet first-sync failure: the pull
+  // carries order_items booleans and an inspections JSONB object, and the
+  // Android binder throws on both. The driver must normalize before run.
+  const calls = [];
+  const fake = {
+    query: async () => { throw new Error('query should not be called by execute'); },
+    run: async (s, v) => { calls.push([s, v]); return { changes: { changes: 1 } }; },
+  };
+  const db = createCapDb(fake);
+  await db.execute(
+    'INSERT INTO order_items (uuid, leftover_released, billed_by_capacity) VALUES ($1, $2, $3) ON CONFLICT(uuid) DO UPDATE SET leftover_released = excluded.leftover_released WHERE (1)',
+    ['abc-uuid', false, true]
+  );
+  await db.execute(
+    'INSERT INTO inspections (uuid, inspection_data) VALUES ($1, $2) ON CONFLICT(uuid) DO UPDATE SET inspection_data = excluded.inspection_data WHERE (1)',
+    ['insp-uuid', { chain: 'worn', tyres: 'low' }]
+  );
+  eq(calls, [
+    ['INSERT INTO order_items (uuid, leftover_released, billed_by_capacity) VALUES (?, ?, ?) ON CONFLICT(uuid) DO UPDATE SET leftover_released = excluded.leftover_released WHERE (1)', ['abc-uuid', 0, 1]],
+    ['INSERT INTO inspections (uuid, inspection_data) VALUES (?, ?) ON CONFLICT(uuid) DO UPDATE SET inspection_data = excluded.inspection_data WHERE (1)', ['insp-uuid', '{"chain":"worn","tyres":"low"}']],
+  ]);
+});
+
+await checkAsync('select normalizes a boolean param the same way', async () => {
+  const calls = [];
+  const fake = {
+    query: async (s, v) => { calls.push([s, v]); return { values: [] }; },
+    run: async () => { throw new Error('run should not be called by select'); },
+  };
+  const db = createCapDb(fake);
+  await db.select('SELECT * FROM order_items WHERE billed_by_capacity = $1', [true]);
+  eq(calls, [['SELECT * FROM order_items WHERE billed_by_capacity = ?', [1]]]);
 });
 
 console.log(`\n${ok}/${total} passed`);
