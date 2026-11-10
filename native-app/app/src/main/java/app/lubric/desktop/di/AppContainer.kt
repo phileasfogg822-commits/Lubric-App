@@ -2,10 +2,15 @@ package app.lubric.desktop.di
 
 import android.content.Context
 import app.lubric.desktop.data.auth.AuthRepository
+import app.lubric.desktop.data.catalog.CatalogRepository
+import app.lubric.desktop.data.customer.CustomerRepository
+import app.lubric.desktop.data.dashboard.DashboardRepository
 import app.lubric.desktop.data.db.LubricDatabase
 import app.lubric.desktop.data.network.ApiClient
 import app.lubric.desktop.data.network.LubricApi
 import app.lubric.desktop.data.network.TokenHolder
+import app.lubric.desktop.data.pricing.PricingRepository
+import app.lubric.desktop.data.sale.SaleRepository
 import app.lubric.desktop.data.store.TokenStore
 import app.lubric.desktop.data.sync.SyncRepository
 
@@ -47,4 +52,16 @@ class AppContainer(context: Context) {
     val authRepository: AuthRepository by lazy { AuthRepository(tokenStore, api) }
 
     val syncRepository: SyncRepository by lazy { SyncRepository(api, database, tokenStore) }
+
+    val dashboardRepository: DashboardRepository by lazy { DashboardRepository(database) }
+
+    // Phase 2: pricing + sale + catalog + customers. All four take only
+    // the database; shop/user scoping happens at the call site.
+    val pricingRepository: PricingRepository by lazy { PricingRepository(database) }
+
+    val saleRepository: SaleRepository by lazy { SaleRepository(database) }
+
+    val catalogRepository: CatalogRepository by lazy { CatalogRepository(database) }
+
+    val customerRepository: CustomerRepository by lazy { CustomerRepository(database) }
 }

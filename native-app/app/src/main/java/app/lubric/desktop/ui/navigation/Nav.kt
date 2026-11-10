@@ -12,12 +12,20 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import app.lubric.desktop.di.AppContainer
+import app.lubric.desktop.ui.customers.CustomerDetailScreen
+import app.lubric.desktop.ui.customers.CustomerDetailViewModel
+import app.lubric.desktop.ui.customers.CustomersScreen
+import app.lubric.desktop.ui.customers.CustomersViewModel
 import app.lubric.desktop.ui.home.HomeScreen
 import app.lubric.desktop.ui.home.HomeViewModel
 import app.lubric.desktop.ui.login.LoginScreen
 import app.lubric.desktop.ui.login.LoginViewModel
 import app.lubric.desktop.ui.pairing.PairingScreen
 import app.lubric.desktop.ui.pairing.PairingViewModel
+import app.lubric.desktop.ui.products.ProductsScreen
+import app.lubric.desktop.ui.products.ProductsViewModel
+import app.lubric.desktop.ui.sale.SaleScreen
+import app.lubric.desktop.ui.sale.SaleViewModel
 import app.lubric.desktop.ui.sync.SyncStatusScreen
 import app.lubric.desktop.ui.sync.SyncStatusViewModel
 
@@ -27,6 +35,13 @@ object Routes {
     const val PAIRING = "pairing"
     const val HOME = "home"
     const val SYNC = "sync"
+    // Phase 2 routes.
+    const val SALE = "sale"
+    const val CUSTOMERS = "customers"
+    const val CUSTOMER_DETAIL = "customer_detail/{customerId}"
+    const val PRODUCTS = "products"
+
+    fun customerDetail(customerId: Long) = "customer_detail/$customerId"
 }
 
 /** Tiny ViewModel factory so screens can take repository constructor params. */
@@ -66,8 +81,16 @@ fun LubricNavHost(
             deviceToken == null -> Routes.PAIRING
             else -> Routes.HOME
         }
-        val stayOnSync = target == Routes.HOME && currentRoute == Routes.SYNC
-        if (currentRoute != null && currentRoute != target && !stayOnSync) {
+        // The auth observer redirects to LOGIN/PAIRING/HOME, but must not
+        // yank the user out of a deliberately opened detail screen (sync,
+        // sale, customers, customer detail, products) while the state
+        // still points at home.
+        val detailRoutes = setOf(
+            Routes.SYNC, Routes.SALE, Routes.CUSTOMERS,
+            Routes.CUSTOMER_DETAIL, Routes.PRODUCTS,
+        )
+        val stayOnDetail = target == Routes.HOME && currentRoute in detailRoutes
+        if (currentRoute != null && currentRoute != target && !stayOnDetail) {
             navController.navigate(target) {
                 popUpTo(navController.graph.startDestinationId) { inclusive = true }
                 launchSingleTop = true
@@ -91,10 +114,75 @@ fun LubricNavHost(
         composable(Routes.HOME) {
             val vm: HomeViewModel = viewModel(
                 factory = vmFactory {
-                    HomeViewModel(container.syncRepository, container.authRepository)
+                    HomeViewModel(
+                        container.syncRepository,
+                        container.authRepository,
+                        container.dashboardRepository,
+                    )
                 }
             )
-            HomeScreen(vm, onOpenSync = { navController.navigate(Routes.SYNC) })
+            HomeScreen(
+                vm,
+                onOpenSync = { navController.navigate(Routes.SYNC) },
+                onOpenSale = { navController.navigate(Routes.SALE) },
+                onOpenCustomers = { navController.navigate(Routes.CUSTOMERS) },
+                onOpenProducts = { navController.navigate(Routes.PRODUCTS) },
+            )
+        }
+        composable(Routes.SALE) {
+            val vm: SaleViewModel = viewModel(
+                factory = vmFactory {
+                    SaleViewModel(
+                        container.database,
+                        container.saleRepository,
+                        container.pricingRepository,
+                    )
+                }
+            )
+            // Session is non-null on this route (the auth observer only
+            // leaves the user here when target == HOME); 0 is a fallback
+            // that can never legitimately reach a write.
+            SaleScreen(
+                vm,
+                userId = session?.userId ?: 0,
+                shopId = session?.shopId ?: 0,
+                onBack = { navController.popBackStack() },
+                onSaleComplete = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.CUSTOMERS) {
+            val vm: CustomersViewModel = viewModel(
+                factory = vmFactory { CustomersViewModel(container.customerRepository) }
+            )
+            CustomersScreen(
+                vm,
+                shopId = session?.shopId ?: 0,
+                onCustomerClick = { id -> navController.navigate(Routes.customerDetail(id)) },
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.CUSTOMER_DETAIL) { backStackEntry ->
+            val customerId =
+                backStackEntry.arguments?.getString("customerId")?.toLongOrNull() ?: 0L
+            val vm: CustomerDetailViewModel = viewModel(
+                factory = vmFactory {
+                    CustomerDetailViewModel(container.customerRepository, customerId)
+                }
+            )
+            CustomerDetailScreen(
+                vm,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.PRODUCTS) {
+            val vm: ProductsViewModel = viewModel(
+                factory = vmFactory { ProductsViewModel(container.catalogRepository) }
+            )
+            ProductsScreen(
+                vm,
+                shopId = session?.shopId ?: 0,
+                onBack = { navController.popBackStack() },
+            )
         }
         composable(Routes.SYNC) {
             val vm: SyncStatusViewModel = viewModel(

@@ -34,9 +34,12 @@ class AuthRepository(
 
     /**
      * Restores a saved session from TokenStore. Called once by the UI at
-     * startup — no I/O happens in init.
+     * startup — no I/O happens in init. Also restores the in-memory token
+     * holder (otherwise API calls go out unauthenticated after a restart)
+     * and the persisted outlet list for the shop picker.
      */
     suspend fun loadSession() {
+        tokenStore.restoreTokens()
         val token = tokenStore.userToken.first()
         if (token == null) {
             _session.value = null
@@ -47,6 +50,7 @@ class AuthRepository(
             email = tokenStore.userEmail.first() ?: "",
             name = tokenStore.userName.first() ?: "",
             shopId = tokenStore.shopId.first() ?: 0,
+            shops = tokenStore.loadShops(),
         )
     }
 
@@ -70,6 +74,7 @@ class AuthRepository(
                 userName = response.user.fullName ?: "",
                 email = response.user.email,
             )
+            tokenStore.saveShops(response.shops)
             val session = AuthSession(
                 userId = response.user.id,
                 email = response.user.email,
@@ -84,6 +89,27 @@ class AuthRepository(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    /**
+     * Switch the active outlet. Persists the choice (TokenStore.setShopId)
+     * so the OkHttp interceptor sends it as X-Shop-Id on user-token calls
+     * from now on, and updates the session so the UI follows.
+     *
+     * Note: this only changes the outlet for user-token calls. The synced
+     * Room data stays with the shop the device was paired to (the device
+     * token carries a fixed shop_id server-side); picking another outlet
+     * does not re-sync different data.
+     */
+    suspend fun switchShop(shopId: Int): Result<AuthSession> {
+        val current = _session.value ?: return Result.failure(Exception("Not signed in"))
+        if (current.shops.isNotEmpty() && current.shops.none { it.id == shopId }) {
+            return Result.failure(Exception("Shop $shopId is not one of your outlets"))
+        }
+        tokenStore.setShopId(shopId)
+        val updated = current.copy(shopId = shopId)
+        _session.value = updated
+        return Result.success(updated)
     }
 
     /**

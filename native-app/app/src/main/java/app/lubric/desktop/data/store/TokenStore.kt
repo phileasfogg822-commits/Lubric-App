@@ -7,8 +7,11 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import app.lubric.desktop.data.network.ShopDto
 import app.lubric.desktop.data.network.TokenHolder
+import com.google.gson.Gson
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.tokenDataStore: DataStore<Preferences> by preferencesDataStore(
@@ -41,6 +44,9 @@ class TokenStore(
     val shopId: Flow<Int?> = dataStore.data.map { it[KEY_SHOP_ID] }
     val userName: Flow<String?> = dataStore.data.map { it[KEY_USER_NAME] }
     val userEmail: Flow<String?> = dataStore.data.map { it[KEY_USER_EMAIL] }
+    val shopsJson: Flow<String?> = dataStore.data.map { it[KEY_SHOPS_JSON] }
+
+    private val gson = Gson()
 
     suspend fun saveUserSession(
         token: String,
@@ -74,6 +80,38 @@ class TokenStore(
         tokenHolder.shopId = id
     }
 
+    /**
+     * Persist the outlet list from login, so the shop picker survives a
+     * restart (Phase 1 kept it only in memory for the login turn).
+     */
+    suspend fun saveShops(shops: List<ShopDto>) {
+        dataStore.edit { prefs ->
+            prefs[KEY_SHOPS_JSON] = gson.toJson(shops)
+        }
+    }
+
+    /** The persisted outlet list, empty when nothing was saved yet. */
+    suspend fun loadShops(): List<ShopDto> {
+        val json = shopsJson.first() ?: return emptyList()
+        return try {
+            gson.fromJson(json, Array<ShopDto>::class.java)?.toList() ?: emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * Restore the in-memory [TokenHolder] from DataStore. Phase 1 never did
+     * this: after a process restart the holder stayed null even though the
+     * session and device token were restored, so user-token and device calls
+     * went out without Authorization / X-Shop-Id. Call once at startup.
+     */
+    suspend fun restoreTokens() {
+        tokenHolder.userToken = userToken.first()
+        tokenHolder.deviceToken = deviceToken.first()
+        tokenHolder.shopId = shopId.first()
+    }
+
     /** Clears the user session only; the device token is kept (see AuthRepository.logout). */
     suspend fun clearUserSession() {
         dataStore.edit { prefs ->
@@ -82,6 +120,7 @@ class TokenStore(
             prefs.remove(KEY_SHOP_ID)
             prefs.remove(KEY_USER_NAME)
             prefs.remove(KEY_USER_EMAIL)
+            prefs.remove(KEY_SHOPS_JSON)
         }
         tokenHolder.userToken = null
         tokenHolder.shopId = null
@@ -101,5 +140,6 @@ class TokenStore(
         private val KEY_SHOP_ID = intPreferencesKey("shop_id")
         private val KEY_USER_NAME = stringPreferencesKey("user_name")
         private val KEY_USER_EMAIL = stringPreferencesKey("user_email")
+        private val KEY_SHOPS_JSON = stringPreferencesKey("shops_json")
     }
 }
