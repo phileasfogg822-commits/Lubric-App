@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.rememberNavController
 import app.lubric.desktop.di.AppContainer
@@ -52,6 +53,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun LubricApp(container: AppContainer) {
     val navController = rememberNavController()
+    val appContext = LocalContext.current.applicationContext
     val session by container.authRepository.session.collectAsState()
     val deviceToken by container.syncRepository.deviceToken.collectAsState(initial = null)
     var restored by remember { mutableStateOf(false) }
@@ -70,7 +72,7 @@ private fun LubricApp(container: AppContainer) {
     LaunchedEffect(session) {
         if (session != null && !periodicStarted) {
             periodicStarted = true
-            container.syncRepository.startPeriodicSync(applicationContext)
+            container.syncRepository.startPeriodicSync(appContext)
         }
     }
 
