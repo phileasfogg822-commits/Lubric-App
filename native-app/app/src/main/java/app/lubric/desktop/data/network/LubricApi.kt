@@ -11,8 +11,9 @@ import retrofit2.http.Query
  * within it, so the origin must NOT carry an /api suffix).
  *
  * Auth scheme: `Authorization: Bearer <token>` everywhere. Device-token
- * calls go to /api/v1/*; user-token calls (auth + generic SQL) go to
- * /api/* and also carry X-Shop-Id (see the interceptor in ApiClient).
+ * calls go to the /api/v1/ endpoints; user-token calls (auth + generic
+ * SQL) go to /api/ and also carry X-Shop-Id (see the interceptor in
+ * ApiClient).
  */
 interface LubricApi {
 

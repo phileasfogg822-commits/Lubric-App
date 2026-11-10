@@ -17,8 +17,11 @@ class LubricApplication : Application(), Configuration.Provider {
 
     val container: AppContainer by lazy { AppContainer(applicationContext) }
 
-    override fun getWorkManagerConfiguration(): Configuration =
-        Configuration.Builder()
+    // WorkManager 2.9.0 declares Provider as a Kotlin property, not a
+    // Java-style getter: `override fun getWorkManagerConfiguration()`
+    // does not satisfy it ("overrides nothing" + missing implementation).
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
             .setWorkerFactory(SyncWorkerFactory(container.syncRepository))
             .build()
 }
