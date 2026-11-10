@@ -1,0 +1,48 @@
+name: Native APK (Lubric POS)
+
+# Builds the native Kotlin + Jetpack Compose Lubric-App in native-app/.
+# The APK talks to the same VPS backend/database as the web app: the hub
+# origin is baked into BuildConfig.HUB_URL at build time.
+on:
+  push:
+    branches: [native-app]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Unit tests gate the build
+        working-directory: native-app
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Build debug APK
+        working-directory: native-app
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      # Same-database wiring check: the hub origin must be baked into the
+      # built app config, otherwise the APK would call the wrong host.
+      - name: Verify hub URL is baked into the app config
+        working-directory: native-app
+        run: |
+          grep -r "72.61.115.120:9001" app/build/generated/source/buildConfig/debug/ | head -3
+          grep -c "72.61.115.120:9001" app/build/generated/source/buildConfig/debug/app/lubric/desktop/BuildConfig.java
+
+      - name: Record APK SHA-256
+        working-directory: native-app
+        run: sha256sum app/build/outputs/apk/debug/*.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lubric-native-apk
+          path: native-app/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

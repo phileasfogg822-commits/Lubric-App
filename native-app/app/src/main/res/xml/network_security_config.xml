@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The shop hub is plain http://72.61.115.120:9001, so cleartext must be
+  allowed for that host. This is the same trap that broke the Flutter
+  release builds (missing INTERNET permission + missing cleartext config).
+  Cleartext is scoped to the hub IP only; everything else stays HTTPS-only.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">72.61.115.120</domain>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
