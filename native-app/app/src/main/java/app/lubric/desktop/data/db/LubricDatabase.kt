@@ -5,6 +5,17 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
+import app.lubric.desktop.data.accounts.AccountQueriesDao
+import app.lubric.desktop.data.expenses.ExpenseQueriesDao
+import app.lubric.desktop.data.field.FieldQueriesDao
+import app.lubric.desktop.data.inspections.InspectionQueriesDao
+import app.lubric.desktop.data.purchases.PurchaseQueriesDao
+import app.lubric.desktop.data.reminders.ReminderQueriesDao
+import app.lubric.desktop.data.reports.ReportQueriesDao
+import app.lubric.desktop.data.shop.ShopQueriesDao
+import app.lubric.desktop.data.team.TeamQueriesDao
+import app.lubric.desktop.data.transactions.TransactionQueriesDao
+import app.lubric.desktop.data.vendors.VendorQueriesDao
 
 /**
  * The local Room database ("lubric", version 1), mirroring the web app's
@@ -116,6 +127,20 @@ abstract class LubricDatabase : RoomDatabase() {
     abstract fun warehouseLocationDao(): WarehouseLocationDao
     abstract fun syncStateDao(): SyncStateDao
     abstract fun outboxDao(): OutboxDao
+
+    // Phase 3 query DAOs (one per screen area; registered here so Room
+    // generates their implementations).
+    abstract fun purchaseQueriesDao(): PurchaseQueriesDao
+    abstract fun inspectionQueriesDao(): InspectionQueriesDao
+    abstract fun accountQueriesDao(): AccountQueriesDao
+    abstract fun expenseQueriesDao(): ExpenseQueriesDao
+    abstract fun teamQueriesDao(): TeamQueriesDao
+    abstract fun shopQueriesDao(): ShopQueriesDao
+    abstract fun vendorQueriesDao(): VendorQueriesDao
+    abstract fun reportQueriesDao(): ReportQueriesDao
+    abstract fun reminderQueriesDao(): ReminderQueriesDao
+    abstract fun transactionQueriesDao(): TransactionQueriesDao
+    abstract fun fieldQueriesDao(): FieldQueriesDao
 
     /** Drop the outbox triggers (before a pull). */
     fun dropOutboxTriggers() {

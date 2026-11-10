@@ -1,18 +1,31 @@
 package app.lubric.desktop.di
 
 import android.content.Context
+import app.lubric.desktop.data.accounts.AccountRepository
 import app.lubric.desktop.data.auth.AuthRepository
+import app.lubric.desktop.data.branding.BrandingRepository
 import app.lubric.desktop.data.catalog.CatalogRepository
 import app.lubric.desktop.data.customer.CustomerRepository
 import app.lubric.desktop.data.dashboard.DashboardRepository
 import app.lubric.desktop.data.db.LubricDatabase
+import app.lubric.desktop.data.expenses.ExpenseRepository
+import app.lubric.desktop.data.inspections.InspectionRepository
+import app.lubric.desktop.data.ledger.LedgerRepository
 import app.lubric.desktop.data.network.ApiClient
 import app.lubric.desktop.data.network.LubricApi
 import app.lubric.desktop.data.network.TokenHolder
 import app.lubric.desktop.data.pricing.PricingRepository
+import app.lubric.desktop.data.purchases.PurchaseRepository
+import app.lubric.desktop.data.field.FieldRepository
+import app.lubric.desktop.data.reminders.ReminderRepository
+import app.lubric.desktop.data.reports.ReportRepository
 import app.lubric.desktop.data.sale.SaleRepository
+import app.lubric.desktop.data.shop.ShopRepository
 import app.lubric.desktop.data.store.TokenStore
 import app.lubric.desktop.data.sync.SyncRepository
+import app.lubric.desktop.data.team.TeamRepository
+import app.lubric.desktop.data.transactions.TransactionsRepository
+import app.lubric.desktop.data.vendors.VendorRepository
 
 /**
  * Manual dependency container, created once in MainActivity and passed down
@@ -64,4 +77,33 @@ class AppContainer(context: Context) {
     val catalogRepository: CatalogRepository by lazy { CatalogRepository(database) }
 
     val customerRepository: CustomerRepository by lazy { CustomerRepository(database) }
+
+    // Phase 3: purchases + inspections, accounts + expenses, team + shop
+    // + branding. All take only the database (branding takes the API),
+    // as in Phase 2; shop/user scoping happens at the call site.
+    val purchaseRepository: PurchaseRepository by lazy { PurchaseRepository(database) }
+
+    val inspectionRepository: InspectionRepository by lazy { InspectionRepository(database) }
+
+    val accountRepository: AccountRepository by lazy { AccountRepository(database) }
+
+    val expenseRepository: ExpenseRepository by lazy { ExpenseRepository(database) }
+
+    val teamRepository: TeamRepository by lazy { TeamRepository(database) }
+
+    val shopRepository: ShopRepository by lazy { ShopRepository(database) }
+
+    val brandingRepository: BrandingRepository by lazy { BrandingRepository(api) }
+
+    val vendorRepository: VendorRepository by lazy { VendorRepository(database) }
+
+    val ledgerRepository: LedgerRepository by lazy { LedgerRepository(database) }
+
+    val reportRepository: ReportRepository by lazy { ReportRepository(database) }
+
+    val reminderRepository: ReminderRepository by lazy { ReminderRepository(database) }
+
+    val transactionsRepository: TransactionsRepository by lazy { TransactionsRepository(database) }
+
+    val fieldRepository: FieldRepository by lazy { FieldRepository(database) }
 }

@@ -43,6 +43,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.lubric.desktop.data.auth.AuthRepository
 import app.lubric.desktop.data.auth.AuthSession
+import app.lubric.desktop.ui.accounts.ROUTE_ACCOUNTS
+import app.lubric.desktop.ui.branding.WHITELABEL_ROUTE
+import app.lubric.desktop.ui.expenses.ROUTE_EXPENSES
+import app.lubric.desktop.ui.field.FIELD_ROUTE
+import app.lubric.desktop.ui.inspections.INSPECTIONS_ROUTE
+import app.lubric.desktop.ui.khata.KHATA_ROUTE
+import app.lubric.desktop.ui.purchases.PURCHASES_ROUTE
+import app.lubric.desktop.ui.reminders.REMINDERS_ROUTE
+import app.lubric.desktop.ui.reports.PROFIT_ROUTE
+import app.lubric.desktop.ui.reports.REPORTS_ROUTE
+import app.lubric.desktop.ui.shop.SHOP_ROUTE
+import app.lubric.desktop.ui.team.TEAM_ROUTE
+import app.lubric.desktop.ui.transactions.TRANSACTIONS_ROUTE
+import app.lubric.desktop.ui.vendors.VENDORS_ROUTE
 import app.lubric.desktop.data.dashboard.DashboardRepository
 import app.lubric.desktop.data.sync.SyncRepository
 import app.lubric.desktop.data.sync.SyncState
@@ -166,6 +180,24 @@ class HomeViewModel(
 fun money(n: Double): String =
     if (n == floor(n)) "Rs ${"%,.0f".format(n)}" else "Rs ${"%,.2f".format(n)}"
 
+/** Phase 3 home menu: label + route for every screen beyond the main four. */
+private val MORE_MENU: List<Pair<String, String>> = listOf(
+    "Vendors" to VENDORS_ROUTE,
+    "Khata" to KHATA_ROUTE,
+    "Accounts" to ROUTE_ACCOUNTS,
+    "Expenses" to ROUTE_EXPENSES,
+    "Purchases" to PURCHASES_ROUTE,
+    "Inspections" to INSPECTIONS_ROUTE,
+    "Reminders" to REMINDERS_ROUTE,
+    "Transactions" to TRANSACTIONS_ROUTE,
+    "Reports" to REPORTS_ROUTE,
+    "Profit & Loss" to PROFIT_ROUTE,
+    "Field Activity" to FIELD_ROUTE,
+    "Team & Access" to TEAM_ROUTE,
+    "Shop Settings" to SHOP_ROUTE,
+    "White Label" to WHITELABEL_ROUTE,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
@@ -174,6 +206,7 @@ fun HomeScreen(
     onOpenSale: () -> Unit,
     onOpenCustomers: () -> Unit,
     onOpenProducts: () -> Unit,
+    onOpenScreen: (String) -> Unit,
 ) {
     val session by viewModel.session.collectAsState()
     val syncState by viewModel.syncState.collectAsState()
@@ -367,6 +400,37 @@ fun HomeScreen(
                             onClick = onOpenProducts,
                             modifier = Modifier.weight(1f).padding(start = 4.dp),
                         ) { Text("Products") }
+                    }
+
+                    // -- More: every other screen, two buttons per row so
+                    // the menu fits a phone and still reads on a tablet.
+                    Spacer(Modifier.height(16.dp))
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("More", style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.height(8.dp))
+                            for (row in MORE_MENU.chunked(2)) {
+                                Row(modifier = Modifier.fillMaxWidth()) {
+                                    for ((index, entry) in row.withIndex()) {
+                                        OutlinedButton(
+                                            onClick = { onOpenScreen(entry.second) },
+                                            modifier = Modifier.weight(1f)
+                                                .padding(
+                                                    end = if (index == 0 && row.size > 1) 4.dp else 0.dp,
+                                                    start = if (index == 1) 4.dp else 0.dp,
+                                                ),
+                                        ) { Text(entry.first) }
+                                    }
+                                    // A lone button in the last row still
+                                    // takes only half the width, like the
+                                    // Customers/Products row above.
+                                    if (row.size == 1) {
+                                        Spacer(Modifier.weight(1f).padding(start = 4.dp))
+                                    }
+                                }
+                                Spacer(Modifier.height(8.dp))
+                            }
+                        }
                     }
 
                     Spacer(Modifier.height(16.dp))

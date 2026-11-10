@@ -51,4 +51,23 @@ interface LubricApi {
 
     @POST("api/transaction")
     suspend fun transaction(@Body request: TransactionRequest): TransactionResponse
+
+    // -- Config & feature flags (user token + X-Shop-Id, Package F) --------
+
+    /**
+     * Bare JSON array of config rows ({key, value, shop_id, updated_at}).
+     * The server filters by session: public branding keys for anyone,
+     * included_modules for any signed-in session, the rest for admin /
+     * shop.manage. Supports ?key=X on the server, but the White Label
+     * screen reads the whole visible set in one call.
+     */
+    @GET("api/config")
+    suspend fun config(): List<ConfigRowDto>
+
+    /**
+     * Bare JSON array of feature-flag rows ({key, enabled, shop_id,
+     * updated_at}). Session required (401 without a user token).
+     */
+    @GET("api/feature-flags")
+    suspend fun featureFlags(): List<FeatureFlagDto>
 }

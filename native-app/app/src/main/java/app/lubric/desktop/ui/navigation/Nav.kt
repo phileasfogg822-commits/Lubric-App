@@ -12,22 +12,79 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import app.lubric.desktop.di.AppContainer
+import app.lubric.desktop.ui.accounts.AccountDetailScreen
+import app.lubric.desktop.ui.accounts.AccountDetailViewModel
+import app.lubric.desktop.ui.accounts.AccountsScreen
+import app.lubric.desktop.ui.accounts.AccountsViewModel
+import app.lubric.desktop.ui.accounts.ROUTE_ACCOUNT_DETAIL
+import app.lubric.desktop.ui.accounts.ROUTE_ACCOUNTS
+import app.lubric.desktop.ui.accounts.accountDetailRoute
+import app.lubric.desktop.ui.branding.WHITELABEL_ROUTE
+import app.lubric.desktop.ui.branding.WhiteLabelScreen
+import app.lubric.desktop.ui.branding.WhiteLabelViewModel
 import app.lubric.desktop.ui.customers.CustomerDetailScreen
 import app.lubric.desktop.ui.customers.CustomerDetailViewModel
 import app.lubric.desktop.ui.customers.CustomersScreen
 import app.lubric.desktop.ui.customers.CustomersViewModel
+import app.lubric.desktop.ui.expenses.ExpensesScreen
+import app.lubric.desktop.ui.expenses.ExpensesViewModel
+import app.lubric.desktop.ui.expenses.ROUTE_EXPENSES
+import app.lubric.desktop.ui.field.FIELD_ROUTE
+import app.lubric.desktop.ui.field.FieldActivityScreen
+import app.lubric.desktop.ui.field.FieldActivityViewModel
 import app.lubric.desktop.ui.home.HomeScreen
 import app.lubric.desktop.ui.home.HomeViewModel
+import app.lubric.desktop.ui.inspections.INSPECTIONS_ROUTE
+import app.lubric.desktop.ui.inspections.InspectionsScreen
+import app.lubric.desktop.ui.inspections.InspectionsViewModel
+import app.lubric.desktop.ui.khata.KHATA_ROUTE
+import app.lubric.desktop.ui.khata.KhataScreen
+import app.lubric.desktop.ui.khata.KhataViewModel
 import app.lubric.desktop.ui.login.LoginScreen
 import app.lubric.desktop.ui.login.LoginViewModel
 import app.lubric.desktop.ui.pairing.PairingScreen
 import app.lubric.desktop.ui.pairing.PairingViewModel
 import app.lubric.desktop.ui.products.ProductsScreen
 import app.lubric.desktop.ui.products.ProductsViewModel
+import app.lubric.desktop.ui.purchases.PURCHASES_ROUTE
+import app.lubric.desktop.ui.purchases.PURCHASE_DETAIL_ROUTE
+import app.lubric.desktop.ui.purchases.PurchaseDetailScreen
+import app.lubric.desktop.ui.purchases.PurchasesScreen
+import app.lubric.desktop.ui.purchases.PurchasesViewModel
+import app.lubric.desktop.ui.purchases.purchaseDetailRoute
+import app.lubric.desktop.ui.reminders.REMINDERS_ROUTE
+import app.lubric.desktop.ui.reminders.RemindersScreen
+import app.lubric.desktop.ui.reminders.RemindersViewModel
+import app.lubric.desktop.ui.reports.PROFIT_ROUTE
+import app.lubric.desktop.ui.reports.ProfitLossScreen
+import app.lubric.desktop.ui.reports.ProfitLossViewModel
+import app.lubric.desktop.ui.reports.REPORTS_ROUTE
+import app.lubric.desktop.ui.reports.ReportsScreen
+import app.lubric.desktop.ui.reports.ReportsViewModel
 import app.lubric.desktop.ui.sale.SaleScreen
 import app.lubric.desktop.ui.sale.SaleViewModel
+import app.lubric.desktop.ui.shop.SHOP_ROUTE
+import app.lubric.desktop.ui.shop.ShopSettingsScreen
+import app.lubric.desktop.ui.shop.ShopSettingsViewModel
 import app.lubric.desktop.ui.sync.SyncStatusScreen
 import app.lubric.desktop.ui.sync.SyncStatusViewModel
+import app.lubric.desktop.ui.team.TEAM_ROUTE
+import app.lubric.desktop.ui.team.TeamScreen
+import app.lubric.desktop.ui.team.TeamViewModel
+import app.lubric.desktop.ui.transactions.TRANSACTIONS_ROUTE
+import app.lubric.desktop.ui.transactions.TRANSACTION_DETAIL_ROUTE
+import app.lubric.desktop.ui.transactions.TransactionDetailScreen
+import app.lubric.desktop.ui.transactions.TransactionDetailViewModel
+import app.lubric.desktop.ui.transactions.TransactionsScreen
+import app.lubric.desktop.ui.transactions.TransactionsViewModel
+import app.lubric.desktop.ui.transactions.transactionDetailRoute
+import app.lubric.desktop.ui.vendors.VENDORS_ROUTE
+import app.lubric.desktop.ui.vendors.VENDOR_DETAIL_ROUTE
+import app.lubric.desktop.ui.vendors.VendorDetailScreen
+import app.lubric.desktop.ui.vendors.VendorDetailViewModel
+import app.lubric.desktop.ui.vendors.VendorsScreen
+import app.lubric.desktop.ui.vendors.VendorsViewModel
+import app.lubric.desktop.ui.vendors.vendorDetailRoute
 
 /** Route names for the Phase 1 graph: login → pairing → home (+ sync detail). */
 object Routes {
@@ -83,11 +140,19 @@ fun LubricNavHost(
         }
         // The auth observer redirects to LOGIN/PAIRING/HOME, but must not
         // yank the user out of a deliberately opened detail screen (sync,
-        // sale, customers, customer detail, products) while the state
-        // still points at home.
+        // sale, customers, customer detail, products, and all Phase 3
+        // screens) while the state still points at home.
         val detailRoutes = setOf(
             Routes.SYNC, Routes.SALE, Routes.CUSTOMERS,
             Routes.CUSTOMER_DETAIL, Routes.PRODUCTS,
+            PURCHASES_ROUTE, PURCHASE_DETAIL_ROUTE, INSPECTIONS_ROUTE,
+            ROUTE_ACCOUNTS, ROUTE_ACCOUNT_DETAIL, ROUTE_EXPENSES,
+            TEAM_ROUTE, SHOP_ROUTE, WHITELABEL_ROUTE,
+            VENDORS_ROUTE, VENDOR_DETAIL_ROUTE, KHATA_ROUTE,
+            "khata/{partyType}/{partyId}",
+            REPORTS_ROUTE, PROFIT_ROUTE,
+            REMINDERS_ROUTE, TRANSACTIONS_ROUTE, TRANSACTION_DETAIL_ROUTE,
+            FIELD_ROUTE,
         )
         val stayOnDetail = target == Routes.HOME && currentRoute in detailRoutes
         if (currentRoute != null && currentRoute != target && !stayOnDetail) {
@@ -127,6 +192,7 @@ fun LubricNavHost(
                 onOpenSale = { navController.navigate(Routes.SALE) },
                 onOpenCustomers = { navController.navigate(Routes.CUSTOMERS) },
                 onOpenProducts = { navController.navigate(Routes.PRODUCTS) },
+                onOpenScreen = { route -> navController.navigate(route) },
             )
         }
         composable(Routes.SALE) {
@@ -189,6 +255,213 @@ fun LubricNavHost(
                 factory = vmFactory { SyncStatusViewModel(container.syncRepository) }
             )
             SyncStatusScreen(vm, onBack = { navController.popBackStack() })
+        }
+        // Phase 3 screens.
+        composable(PURCHASES_ROUTE) {
+            val vm: PurchasesViewModel = viewModel(
+                factory = vmFactory { PurchasesViewModel(container.purchaseRepository) }
+            )
+            PurchasesScreen(
+                vm,
+                shopId = session?.shopId ?: 0,
+                onPurchaseClick = { id -> navController.navigate(purchaseDetailRoute(id)) },
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(PURCHASE_DETAIL_ROUTE) { backStackEntry ->
+            val purchaseOrderId =
+                backStackEntry.arguments?.getString("purchaseOrderId")?.toLongOrNull() ?: 0L
+            val vm: PurchasesViewModel = viewModel(
+                factory = vmFactory { PurchasesViewModel(container.purchaseRepository) }
+            )
+            PurchaseDetailScreen(
+                vm,
+                purchaseOrderId = purchaseOrderId,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(INSPECTIONS_ROUTE) {
+            val vm: InspectionsViewModel = viewModel(
+                factory = vmFactory { InspectionsViewModel(container.inspectionRepository) }
+            )
+            InspectionsScreen(
+                vm,
+                shopId = session?.shopId ?: 0,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(ROUTE_ACCOUNTS) {
+            val vm: AccountsViewModel = viewModel(
+                factory = vmFactory { AccountsViewModel(container.accountRepository) }
+            )
+            AccountsScreen(
+                vm,
+                shopId = session?.shopId ?: 0,
+                onAccountClick = { id -> navController.navigate(accountDetailRoute(id)) },
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(ROUTE_ACCOUNT_DETAIL) { backStackEntry ->
+            val accountId =
+                backStackEntry.arguments?.getString("accountId")?.toLongOrNull() ?: 0L
+            val vm: AccountDetailViewModel = viewModel(
+                factory = vmFactory { AccountDetailViewModel(container.accountRepository) }
+            )
+            AccountDetailScreen(
+                vm,
+                accountId = accountId,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(ROUTE_EXPENSES) {
+            val vm: ExpensesViewModel = viewModel(
+                factory = vmFactory { ExpensesViewModel(container.expenseRepository) }
+            )
+            ExpensesScreen(
+                vm,
+                shopId = session?.shopId ?: 0,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(TEAM_ROUTE) {
+            val vm: TeamViewModel = viewModel(
+                factory = vmFactory { TeamViewModel(container.teamRepository) }
+            )
+            TeamScreen(vm, onBack = { navController.popBackStack() })
+        }
+        composable(SHOP_ROUTE) {
+            val vm: ShopSettingsViewModel = viewModel(
+                factory = vmFactory {
+                    ShopSettingsViewModel(container.shopRepository, container.syncRepository)
+                }
+            )
+            ShopSettingsScreen(
+                vm,
+                shopId = session?.shopId ?: 0,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(WHITELABEL_ROUTE) {
+            val vm: WhiteLabelViewModel = viewModel(
+                factory = vmFactory { WhiteLabelViewModel(container.brandingRepository) }
+            )
+            WhiteLabelScreen(vm, onBack = { navController.popBackStack() })
+        }
+        // Vendors + Khata.
+        composable(VENDORS_ROUTE) {
+            val vm: VendorsViewModel = viewModel(
+                factory = vmFactory { VendorsViewModel(container.vendorRepository) }
+            )
+            VendorsScreen(
+                vm,
+                shopId = session?.shopId ?: 0,
+                onVendorClick = { id -> navController.navigate(vendorDetailRoute(id)) },
+                onOpenKhata = { id -> navController.navigate("khata/vendor/$id") },
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(VENDOR_DETAIL_ROUTE) { backStackEntry ->
+            val vendorId =
+                backStackEntry.arguments?.getString("vendorId")?.toLongOrNull() ?: 0L
+            val vm: VendorDetailViewModel = viewModel(
+                factory = vmFactory {
+                    VendorDetailViewModel(container.vendorRepository, vendorId)
+                }
+            )
+            VendorDetailScreen(
+                vm,
+                onBack = { navController.popBackStack() },
+                onDeleted = { navController.popBackStack() },
+                onOpenKhata = { id -> navController.navigate("khata/vendor/$id") },
+            )
+        }
+        composable(KHATA_ROUTE) {
+            val vm: KhataViewModel = viewModel(
+                factory = vmFactory { KhataViewModel(container.ledgerRepository) }
+            )
+            KhataScreen(
+                vm,
+                shopId = session?.shopId ?: 0,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable("khata/{partyType}/{partyId}") { backStackEntry ->
+            val partyType = backStackEntry.arguments?.getString("partyType") ?: "customer"
+            val partyId = backStackEntry.arguments?.getString("partyId")?.toLongOrNull()
+            val vm: KhataViewModel = viewModel(
+                factory = vmFactory { KhataViewModel(container.ledgerRepository) }
+            )
+            KhataScreen(
+                vm,
+                shopId = session?.shopId ?: 0,
+                onBack = { navController.popBackStack() },
+                initialPartyType = partyType,
+                initialPartyId = partyId,
+            )
+        }
+        // Reports + Profit & Loss.
+        composable(REPORTS_ROUTE) {
+            val vm: ReportsViewModel = viewModel(
+                factory = vmFactory { ReportsViewModel(container.reportRepository) }
+            )
+            ReportsScreen(
+                vm,
+                shopId = session?.shopId ?: 0,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(PROFIT_ROUTE) {
+            val vm: ProfitLossViewModel = viewModel(
+                factory = vmFactory { ProfitLossViewModel(container.reportRepository) }
+            )
+            ProfitLossScreen(
+                vm,
+                shopId = session?.shopId ?: 0,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        // Reminders + Transactions + Field Activity.
+        composable(REMINDERS_ROUTE) {
+            val vm: RemindersViewModel = viewModel(
+                factory = vmFactory { RemindersViewModel(container.reminderRepository) }
+            )
+            RemindersScreen(
+                vm,
+                shopId = session?.shopId ?: 0,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(TRANSACTIONS_ROUTE) {
+            val vm: TransactionsViewModel = viewModel(
+                factory = vmFactory { TransactionsViewModel(container.transactionsRepository) }
+            )
+            TransactionsScreen(
+                vm,
+                onOpenOrder = { id -> navController.navigate(transactionDetailRoute(id)) },
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(TRANSACTION_DETAIL_ROUTE) { backStackEntry ->
+            val orderId =
+                backStackEntry.arguments?.getString("orderId")?.toLongOrNull() ?: 0L
+            val vm: TransactionDetailViewModel = viewModel(
+                factory = vmFactory {
+                    TransactionDetailViewModel(container.transactionsRepository, orderId)
+                }
+            )
+            TransactionDetailScreen(
+                vm,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(FIELD_ROUTE) {
+            val vm: FieldActivityViewModel = viewModel(
+                factory = vmFactory { FieldActivityViewModel(container.fieldRepository) }
+            )
+            FieldActivityScreen(
+                vm,
+                onBack = { navController.popBackStack() },
+            )
         }
     }
 }

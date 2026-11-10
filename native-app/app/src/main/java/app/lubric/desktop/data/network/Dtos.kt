@@ -140,3 +140,36 @@ data class TransactionRequest(
 data class TransactionResponse(
     val results: List<ExecuteResponse>? = null,
 )
+
+// ---------------------------------------------------------------------------
+// Config & feature flags (Package F: White Label)
+// ---------------------------------------------------------------------------
+
+/**
+ * One row of the `config` table, as GET /api/config returns it (a bare JSON
+ * array of rows; server `server/index.js` selects key, value, shop_id,
+ * updated_at). `value` is TEXT on the server — branding keys hold plain
+ * strings, `included_modules` holds a JSON array encoded as a string.
+ * Which rows a caller may see depends on the session: the public branding
+ * keys (app_name, primary_color, default_branding) are readable pre-login,
+ * `included_modules` needs any signed-in session, everything else needs
+ * admin / shop.manage.
+ */
+data class ConfigRowDto(
+    val key: String,
+    val value: String? = null,
+    @SerializedName("shop_id") val shopId: Int? = null,
+    @SerializedName("updated_at") val updatedAt: String? = null,
+)
+
+/**
+ * One row of `feature_flags`, as GET /api/feature-flags returns it (a bare
+ * JSON array of rows: key, enabled, shop_id, updated_at). Reading needs a
+ * signed-in session; `enabled` is a real JSON boolean on the wire.
+ */
+data class FeatureFlagDto(
+    val key: String,
+    val enabled: Boolean = true,
+    @SerializedName("shop_id") val shopId: Int? = null,
+    @SerializedName("updated_at") val updatedAt: String? = null,
+)
