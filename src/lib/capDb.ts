@@ -24,7 +24,10 @@
 
 export interface CapSqliteConn {
   query: (statement: string, values?: unknown[]) => Promise<{ values?: unknown[] }>;
-  run: (statement: string, values?: unknown[]) => Promise<{ changes?: { changes?: number } }>;
+  // transaction: pass false to run a statement bare. The plugin wraps
+  // every run() in its own transaction by default (transaction = true),
+  // which is why this parameter exists at all — see createCapDb below.
+  run: (statement: string, values?: unknown[], transaction?: boolean) => Promise<{ changes?: { changes?: number } }>;
 }
 
 /**
@@ -125,13 +128,23 @@ export function createCapDb(conn: CapSqliteConn): LocalDbHandle {
       const stmts = prepareStatements(sql);
       const values = params.map(normalizeBindValue);
       let affected = 0;
+      // Every run goes through with transaction = false. The plugin wraps
+      // each run() in its own transaction unless told otherwise, and the
+      // app issues its own transaction boundaries: dbTransaction sends
+      // literal BEGIN / COMMIT / ROLLBACK around a sale (and ledger, expense
+      // and product writes). A BEGIN sent inside the plugin's implicit
+      // transaction dies with "cannot start a transaction within a
+      // transaction" (caught 2026-11-11 on the tablet's first Complete
+      // Sale), so the boundaries must reach SQLite bare. Single statements
+      // lose nothing by this: SQLite autocommits them, which is exactly
+      // what the plugin's per-statement wrapper did for them.
       if (stmts.length === 1) {
-        const r = await conn.run(stmts[0], values);
+        const r = await conn.run(stmts[0], values, false);
         affected = r.changes?.changes ?? 0;
       } else {
         // Schema/DDL blocks carry no params; run each statement in order.
         for (const s of stmts) {
-          const r = await conn.run(s, []);
+          const r = await conn.run(s, [], false);
           affected += r.changes?.changes ?? 0;
         }
       }

@@ -100,23 +100,23 @@ await checkAsync('single-statement execute runs once with translated params', as
   const calls = [];
   const fake = {
     query: async () => { throw new Error('query should not be called by execute'); },
-    run: async (s, v) => { calls.push([s, v]); return { changes: { changes: 1 } }; },
+    run: async (s, v, t) => { calls.push([s, v, t]); return { changes: { changes: 1 } }; },
   };
   const db = createCapDb(fake);
   const r = await db.execute('DELETE FROM sync_outbox WHERE id = $1', [9]);
   eq(r.rowsAffected, 1);
-  eq(calls, [['DELETE FROM sync_outbox WHERE id = ?', [9]]]);
+  eq(calls, [['DELETE FROM sync_outbox WHERE id = ?', [9], false]]);
 });
 
 await checkAsync('multi-statement execute runs each statement with no params', async () => {
   const calls = [];
   const fake = {
     query: async () => { throw new Error('query should not be called by execute'); },
-    run: async (s, v) => { calls.push([s, v]); return { changes: { changes: 0 } }; },
+    run: async (s, v, t) => { calls.push([s, v, t]); return { changes: { changes: 0 } }; },
   };
   const db = createCapDb(fake);
   await db.execute('CREATE TABLE IF NOT EXISTS a (id INTEGER); CREATE TABLE IF NOT EXISTS b (id INTEGER);');
-  eq(calls, [['CREATE TABLE IF NOT EXISTS a (id INTEGER)', []], ['CREATE TABLE IF NOT EXISTS b (id INTEGER)', []]]);
+  eq(calls, [['CREATE TABLE IF NOT EXISTS a (id INTEGER)', [], false], ['CREATE TABLE IF NOT EXISTS b (id INTEGER)', [], false]]);
 });
 
 await checkAsync('a pull-like upsert reaches the plugin with only bindable values', async () => {
@@ -126,7 +126,7 @@ await checkAsync('a pull-like upsert reaches the plugin with only bindable value
   const calls = [];
   const fake = {
     query: async () => { throw new Error('query should not be called by execute'); },
-    run: async (s, v) => { calls.push([s, v]); return { changes: { changes: 1 } }; },
+    run: async (s, v, t) => { calls.push([s, v, t]); return { changes: { changes: 1 } }; },
   };
   const db = createCapDb(fake);
   await db.execute(
@@ -138,8 +138,32 @@ await checkAsync('a pull-like upsert reaches the plugin with only bindable value
     ['insp-uuid', { chain: 'worn', tyres: 'low' }]
   );
   eq(calls, [
-    ['INSERT INTO order_items (uuid, leftover_released, billed_by_capacity) VALUES (?, ?, ?) ON CONFLICT(uuid) DO UPDATE SET leftover_released = excluded.leftover_released WHERE (1)', ['abc-uuid', 0, 1]],
-    ['INSERT INTO inspections (uuid, inspection_data) VALUES (?, ?) ON CONFLICT(uuid) DO UPDATE SET inspection_data = excluded.inspection_data WHERE (1)', ['insp-uuid', '{"chain":"worn","tyres":"low"}']],
+    ['INSERT INTO order_items (uuid, leftover_released, billed_by_capacity) VALUES (?, ?, ?) ON CONFLICT(uuid) DO UPDATE SET leftover_released = excluded.leftover_released WHERE (1)', ['abc-uuid', 0, 1], false],
+    ['INSERT INTO inspections (uuid, inspection_data) VALUES (?, ?) ON CONFLICT(uuid) DO UPDATE SET inspection_data = excluded.inspection_data WHERE (1)', ['insp-uuid', '{"chain":"worn","tyres":"low"}'], false],
+  ]);
+});
+
+await checkAsync('a sale transaction reaches the plugin bare: BEGIN, writes, COMMIT', async () => {
+  // Regression test for the 2026-11-11 tablet failure: Complete Sale died
+  // with "cannot start a transaction within a transaction" because the
+  // plugin wraps every run() in its own transaction, so dbTransaction's
+  // literal BEGIN collided with it. Every statement of the transaction
+  // must go through with transaction=false, so BEGIN/COMMIT are real.
+  const calls = [];
+  const fake = {
+    query: async () => { throw new Error('query should not be called by execute'); },
+    run: async (s, v, t) => { calls.push([s, v, t]); return { changes: { changes: 1 } }; },
+  };
+  const db = createCapDb(fake);
+  await db.execute('BEGIN');
+  await db.execute('INSERT INTO orders (id, total, status) VALUES ($1, $2, $3)', [7, 1950, 'completed']);
+  await db.execute('INSERT INTO order_items (order_id, product_name, qty) VALUES ($1, $2, $3)', [7, 'Havoline 20W-50', 1]);
+  await db.execute('COMMIT');
+  eq(calls, [
+    ['BEGIN', [], false],
+    ['INSERT INTO orders (id, total, status) VALUES (?, ?, ?)', [7, 1950, 'completed'], false],
+    ['INSERT INTO order_items (order_id, product_name, qty) VALUES (?, ?, ?)', [7, 'Havoline 20W-50', 1], false],
+    ['COMMIT', [], false],
   ]);
 });
 
