@@ -12,7 +12,6 @@
     "sql:allow-load",
     "sql:allow-execute",
     "sql:allow-select",
-    "sql:allow-close",
-    "single-instance:default"
+    "sql:allow-close"
   ]
 }
