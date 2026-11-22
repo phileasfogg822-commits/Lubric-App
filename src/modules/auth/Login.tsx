@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
+import { isTauri } from "../../lib/db";
 
 export default function Login() {
   const { login } = useAuth();
@@ -82,10 +83,14 @@ export default function Login() {
           </button>
         </form>
 
-        <div style={{ marginTop: 20, fontSize: "0.75rem", color: "#94a3b8", textAlign: "center" }}>
-          <div>Admin: admin@lubric.app / admin123</div>
-          <div>Cashier: cashier@lubric.app / cashier123</div>
-        </div>
+        {/* The demo logins are a web convenience only: the Windows
+            standalone ships no default credentials, so it never shows them. */}
+        {!isTauri() && (
+          <div style={{ marginTop: 20, fontSize: "0.75rem", color: "#94a3b8", textAlign: "center" }}>
+            <div>Admin: admin@lubric.app / admin123</div>
+            <div>Cashier: cashier@lubric.app / cashier123</div>
+          </div>
+        )}
       </div>
     </div>
   );

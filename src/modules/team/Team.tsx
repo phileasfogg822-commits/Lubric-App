@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { dbSelect, dbExecute } from "../../lib/db";
+import bcrypt from "bcryptjs";
+import { dbSelect, dbExecute, isTauri } from "../../lib/db";
 import { Page } from "../../components/Page";
 import { Modal } from "../../components/Modal";
 import { FormField } from "../../components/FormField";
@@ -29,6 +30,8 @@ interface Member {
 
 const ROLE_OPTIONS = [
   { value: "cashier", label: "Cashier" },
+  { value: "worker", label: "Worker" },
+  { value: "accountant", label: "Accountant" },
   { value: "manager", label: "Manager" },
   { value: "owner", label: "Owner" },
   { value: "admin", label: "Admin" },
@@ -140,12 +143,19 @@ export default function Team() {
       const perms = serializePermissions(form.permissions);
       const name = form.full_name.trim();
       const email = form.email.trim();
+      // Windows standalone (Tauri): the local users table is the only
+      // credential store, so a password must be bcrypt-hashed before it is
+      // written — storing the raw password as password_hash would let
+      // anyone who opens the database file read every member's password.
+      // Server mode is unchanged: the server hashes on its own path.
+      const hashFor = async (plain: string) =>
+        isTauri() ? await bcrypt.hash(plain, 10) : plain;
 
       if (editId) {
         if (form.password.trim()) {
           await dbExecute(
             "UPDATE users SET full_name=$1, email=$2, role=$3, permissions=$4, password_hash=$5 WHERE id=$6",
-            [name, email, form.role, perms, form.password, editId]
+            [name, email, form.role, perms, await hashFor(form.password), editId]
           );
         } else {
           await dbExecute(
@@ -156,7 +166,7 @@ export default function Team() {
       } else {
         await dbExecute(
           "INSERT INTO users (full_name, email, password_hash, role, permissions) VALUES ($1,$2,$3,$4,$5)",
-          [name, email, form.password, form.role, perms]
+          [name, email, await hashFor(form.password), form.role, perms]
         );
       }
     },

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { apiBase, authHeaders } from "../../lib/db";
+import { apiBase, authHeaders, dbExecute, isTauri } from "../../lib/db";
 import { invalidateConfigCache } from "../../lib/configFlags";
 import { useConfigMap, useFlagRows } from "../../lib/useConfigFlags";
 import { moduleList } from "../../lib/configRules";
@@ -96,13 +96,33 @@ export default function WhiteLabel() {
 
   function saveBranding() {
     void runSaving(async () => {
-      await patchJson(`/config/app_name`, { value: appName.trim() || "LubricApp" });
-      await patchJson(`/config/primary_color`, { value: primaryColor });
+      if (isTauri()) {
+        // Windows standalone: branding lives in the local `settings` table.
+        // Same keys the server path writes, so every reader is unchanged.
+        await dbExecute("INSERT OR REPLACE INTO settings (key, value) VALUES ('app_name', $1)", [
+          appName.trim() || "lubric.app",
+        ]);
+        await dbExecute("INSERT OR REPLACE INTO settings (key, value) VALUES ('primary_color', $1)", [
+          primaryColor,
+        ]);
+      } else {
+        await patchJson(`/config/app_name`, { value: appName.trim() || "LubricApp" });
+        await patchJson(`/config/primary_color`, { value: primaryColor });
+      }
       setBrandDirty(false);
     }, "Branding saved — applied everywhere already.");
   }
 
   function saveModules() {
+    // Windows standalone: the module manifest and feature flags are
+    // server-side packaging — this build includes all modules, and there
+    // is no server to patch. Deliberate no-op (not a silent failure: the
+    // sections below say so on the screen).
+    if (isTauri()) {
+      setToast({ kind: "ok", text: "This standalone build includes all modules — nothing to change here." });
+      setModulesDirty(false);
+      return;
+    }
     void runSaving(async () => {
       const next = new Set(modules);
       next.add("dashboard");
@@ -114,6 +134,8 @@ export default function WhiteLabel() {
   }
 
   function toggleFlag(key: string) {
+    // Windows standalone: flags are server-side — no-op, same as modules.
+    if (isTauri()) return;
     const row = flags.find((f) => f.key === key);
     if (!row) return;
     void runSaving(async () => {
@@ -207,6 +229,12 @@ export default function WhiteLabel() {
           and their pages stop opening for every role. Dashboard and Shop Settings stay on —
           they are how you get back here.
         </p>
+        {isTauri() && (
+          <p style={{ color: "var(--color-muted)", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
+            Standalone build: all modules are included, and the manifest is managed on the
+            cloud deployment, not here.
+          </p>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "0.5rem" }}>
           {MODULES.map((m) => {
             const on = modules.includes(m.key);
@@ -257,7 +285,12 @@ export default function WhiteLabel() {
         <p style={{ color: "var(--color-muted)", fontSize: "0.8rem", marginBottom: "0.75rem" }}>
           Runtime toggles, independent of the package above. Each switch saves immediately.
         </p>
-        {flags.length === 0 ? (
+        {isTauri() ? (
+          <p style={{ fontSize: "0.85rem", color: "var(--color-muted)" }}>
+            Standalone build: feature flags are managed on the cloud deployment — every
+            flag is on here.
+          </p>
+        ) : flags.length === 0 ? (
           <p style={{ fontSize: "0.85rem", color: "var(--color-muted)" }}>Loading flags…</p>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "0.5rem" }}>

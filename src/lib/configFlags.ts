@@ -15,7 +15,7 @@
  * auth layer invalidates on login/logout because the pre-login fetch only
  * sees the branding subset of config and an empty flag set (401).
  */
-import { apiBase, authHeaders } from './db';
+import { apiBase, authHeaders, dbSelect, isTauri } from './db';
 import { moduleEnabled, pickFlag, type FlagRow } from './configRules';
 
 interface ConfigRow { key: string; value: string; shop_id: number | null; }
@@ -73,7 +73,10 @@ async function fetchRows<T>(path: string): Promise<T[]> {
 /** Fetch config if the cache is empty; subscribers are told when it arrives. */
 export async function ensureConfigLoaded(): Promise<void> {
   if (cachedConfig && Date.now() - configTs < CACHE_MS) return;
-  const rows = await fetchRows<ConfigRow>('/config');
+  // Windows standalone (Tauri): no server exists, so branding and module
+  // config come from the local `settings` table instead of /api/config.
+  // The shape is the same key→value rows, so every reader is unchanged.
+  const rows = isTauri() ? await fetchLocalConfig() : await fetchRows<ConfigRow>('/config');
   // Cache failures too ([]), so a dead server is retried on the next 30s tick
   // rather than once per nav render.
   cachedConfig = rows;
@@ -81,10 +84,24 @@ export async function ensureConfigLoaded(): Promise<void> {
   notify();
 }
 
+/** Read the local settings table as config rows (Tauri only). */
+async function fetchLocalConfig(): Promise<ConfigRow[]> {
+  try {
+    const rows = await dbSelect<{ key: string; value: string }>(
+      "SELECT key, value FROM settings"
+    );
+    return rows.map((r) => ({ key: r.key, value: r.value ?? "", shop_id: null }));
+  } catch {
+    return []; // schema not ready — fail open, as with an unreachable server
+  }
+}
+
 /** Fetch feature flags if the cache is empty; subscribers are told after. */
 export async function ensureFlagsLoaded(): Promise<void> {
   if (cachedFlags && Date.now() - flagsTs < CACHE_MS) return;
-  const rows = await fetchRows<FlagRow>('/feature-flags');
+  // Windows standalone: there is no feature_flags table locally, and flags
+  // fail open to enabled (configRules.pickFlag), so [] is the correct load.
+  const rows = isTauri() ? [] : await fetchRows<FlagRow>('/feature-flags');
   cachedFlags = rows;
   flagsTs = Date.now();
   notify();

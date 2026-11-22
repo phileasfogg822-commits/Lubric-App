@@ -4,12 +4,21 @@ import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
 
+// `tauri build` / `tauri dev` set TAURI_ENV_PLATFORM for beforeBuildCommand
+// and beforeDevCommand. A Tauri window is not a browser tab: a service
+// worker would cache the app shell and serve stale builds after an update,
+// so the PWA plugin is off for Tauri and stays on for the web build.
+const isTauriBuild = !!process.env.TAURI_ENV_PLATFORM;
+
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    VitePWA({
-      registerType: "autoUpdate",
+    ...(isTauriBuild
+      ? []
+      : [
+          VitePWA({
+            registerType: "autoUpdate",
       includeAssets: ["favicon.ico", "apple-touch-icon.png", "mask-icon.svg"],
       manifest: {
         name: "Lubric POS",
@@ -55,7 +64,8 @@ export default defineConfig({
       devOptions: {
         enabled: false,
       },
-    }),
+          }),
+        ]),
   ],
   resolve: {
     alias: {

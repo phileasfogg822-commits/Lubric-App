@@ -1,8 +1,9 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import bcrypt from "bcryptjs";
 import { can, isAdminRole, parsePermissions } from "./permissions";
 // Aliased: the context exposes an `activeShopId` VALUE, and importing the
 // getter under the same name would shadow it inside the provider.
-import { setActiveShopId, activeShopId as readActiveShopId, apiBase } from "./db";
+import { setActiveShopId, activeShopId as readActiveShopId, apiBase, dbGet, isTauri } from "./db";
 // Config/flag caches are keyed to WHO is asking (the pre-login fetch only
 // sees the branding subset and gets 401 on flags), so they are dropped at
 // every identity change.
@@ -121,6 +122,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function login(email: string, password: string): Promise<boolean> {
     setLoading(true);
     try {
+      // Windows standalone (Tauri): there is no server to ask, so the
+      // password is verified against the LOCAL users table instead.
+      if (isTauri()) return await loginLocal(email, password);
       const res = await fetch(`${apiBase()}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -152,6 +156,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  /**
+   * Windows standalone login: verify the password against the local SQLite
+   * users table (bcryptjs) and sign in against the single local shop.
+   * The session marker is the literal string "local" — there is no JWT when
+   * there is no server. Server-mode login is untouched by this path.
+   */
+  async function loginLocal(email: string, password: string): Promise<boolean> {
+    const row = await dbGet<User>(
+      "SELECT id, shop_id, email, password_hash, full_name, role, permissions, created_at FROM users WHERE LOWER(email) = LOWER($1)",
+      [email.trim()]
+    );
+    if (!row || !row.password_hash) return false;
+    const ok = await bcrypt.compare(password, row.password_hash);
+    if (!ok) return false;
+    localStorage.setItem(TOKEN_KEY, "local");
+    // Same cache discipline as the server path: the pre-login branding
+    // cache must not survive into the session.
+    invalidateConfigCache();
+    setUser(row);
+    // One shop, one outlet: the local database holds exactly the shop this
+    // install was set up for.
+    const shop = await dbGet<{ id: number; name: string }>(
+      "SELECT id, name FROM shops WHERE id = $1",
+      [row.shop_id ?? 1]
+    );
+    const outlet: Outlet = {
+      shop_id: shop?.id ?? row.shop_id ?? 1,
+      role: row.role,
+      name: shop?.name ?? "Shop",
+      address: null,
+      phone: null,
+    };
+    setOutlets([outlet]);
+    setActive(outlet.shop_id);
+    setActiveShopId(outlet.shop_id);
+    return true;
   }
 
   function logout() {

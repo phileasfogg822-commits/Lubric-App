@@ -1,15 +1,16 @@
-import { ReactNode, useEffect } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { ReactNode, useEffect, useState } from "react";
+import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { useAuth, AuthProvider } from "./lib/auth";
 import { isAdminRole } from "./lib/permissions";
 import { useConfigMap, useFlagRows, useBranding } from "./lib/useConfigFlags";
-import { isCapacitor, getLocalDb } from "./lib/db";
+import { isCapacitor, isTauri, getLocalDb, dbSelect } from "./lib/db";
 import { startSyncLoop } from "./lib/sync";
 import { moduleEnabled, pickFlag } from "./lib/configRules";
 import Layout from "./components/Layout";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 import Login from "./modules/auth/Login";
+import FirstRunSetup from "./modules/auth/FirstRunSetup";
 import Dashboard from "./modules/dashboard/Dashboard";
 import POS from "./modules/pos/POS";
 import SalesHistory from "./modules/sales/SalesHistory";
@@ -107,6 +108,39 @@ function RedirectIfAuth({ children }: { children: ReactNode }) {
 }
 
 /**
+ * Windows standalone (Tauri) first-run gate. A fresh install has an empty
+ * users table — nobody can sign in yet — so the login page sends the visitor
+ * to /setup instead. Web and server builds skip this entirely; if the local
+ * schema cannot be read yet the login page renders as normal and the setup
+ * screen itself re-checks.
+ */
+function FirstRunGate({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
+  const [checked, setChecked] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (isTauri()) {
+        try {
+          const rows = await dbSelect<{ c: number }>("SELECT COUNT(*) AS c FROM users");
+          if (!cancelled && rows[0] && Number(rows[0].c) === 0) {
+            navigate("/setup", { replace: true });
+          }
+        } catch {
+          // Schema not ready — fall through to the login page.
+        }
+      }
+      if (!cancelled) setChecked(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
+  if (!checked) return <div style={{ padding: 32, textAlign: "center" }}>Loading...</div>;
+  return <>{children}</>;
+}
+
+/**
  * Phase 3.2: the phone's background sync. Starts once at app launch when
  * running in Capacitor; the loop itself no-ops each tick until a cloud URL
  * and a device token exist, so pairing later (Shop Settings) picks it up
@@ -132,7 +166,8 @@ export default function App() {
         <Branding />
         <SyncLoop />
         <Routes>
-          <Route path="/login" element={<RedirectIfAuth><Login /></RedirectIfAuth>} />
+          <Route path="/login" element={<FirstRunGate><RedirectIfAuth><Login /></RedirectIfAuth></FirstRunGate>} />
+          <Route path="/setup" element={<FirstRunSetup />} />
 
           <Route element={<RequireAuth><Layout /></RequireAuth>}>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />

@@ -132,6 +132,34 @@ export function getDefaultPermissions(role: string): string[] {
     );
   }
 
+  // Accountant: the money side — ledgers, accounts, expenses, purchases,
+  // reports and P&L — but no till, no team, and no bill changes.
+  if (r === "accountant") {
+    return [
+      PERMISSIONS.DASHBOARD,
+      PERMISSIONS.SALES_HISTORY,
+      PERMISSIONS.CUSTOMERS,
+      PERMISSIONS.VENDORS,
+      PERMISSIONS.ACCOUNTS,
+      PERMISSIONS.EXPENSES_MANAGE,
+      PERMISSIONS.PURCHASE_MANAGE,
+      PERMISSIONS.REPORTS,
+      PERMISSIONS.PROFIT_LOSS,
+    ];
+  }
+
+  // Worker: counter work only — create bills, look them up, see customers
+  // and run inspections. No money pages, no team, no bill changes.
+  if (r === "worker") {
+    return [
+      PERMISSIONS.DASHBOARD,
+      PERMISSIONS.POS_CREATE,
+      PERMISSIONS.SALES_HISTORY,
+      PERMISSIONS.CUSTOMERS,
+      PERMISSIONS.INSPECTIONS,
+    ];
+  }
+
   // cashier (default)
   return [
     PERMISSIONS.DASHBOARD,

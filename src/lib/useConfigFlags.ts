@@ -11,6 +11,7 @@
  * call the PURE functions from configRules.ts per row instead.
  */
 import { useEffect, useState } from 'react';
+import { isTauri } from './db';
 import {
   subscribeConfig,
   ensureConfigLoaded,
@@ -70,7 +71,9 @@ export interface Branding {
 export function useBranding(): Branding {
   const cfg = useConfigMap();
   return {
-    appName: (cfg['app_name'] ?? '').trim() || 'LUBRIC POS',
+    // Before first-run setup writes app_name, the Windows build is lubric.app
+    // (the product name); the web build keeps its stock label.
+    appName: (cfg['app_name'] ?? '').trim() || (isTauri() ? 'lubric.app' : 'LUBRIC POS'),
     primaryColor: (cfg['primary_color'] ?? '').trim(),
   };
 }
