@@ -87,8 +87,12 @@ check('GREEN: version is 0.1.1 in package.json, tauri.conf.json, Cargo.toml', ()
   assert(read('src-tauri/Cargo.toml').includes('version = "0.1.1"'), 'Cargo.toml is not 0.1.1');
 });
 check('GREEN: Cargo.lock pins the app itself at 0.1.1', () => {
+  // \r?\n: on the Windows runner, checkout converts text files to CRLF,
+  // so the entry reads `name = "lubric-app"\r\nversion = ...` and a
+  // \n-only regex misses it (CI run 45479998849). Never rewrite the lock
+  // file's line endings — tolerate them here instead.
   const lock = read('src-tauri/Cargo.lock');
-  const m = lock.match(/name = "lubric-app"\nversion = "([^"]+)"/);
+  const m = lock.match(/name = "lubric-app"\r?\nversion = "([^"]+)"/);
   assert(m && m[1] === '0.1.1', `lubric-app in Cargo.lock is ${m ? m[1] : 'missing'}`);
 });
 
@@ -192,7 +196,11 @@ check('GREEN: built bundle contains the version-line fragment', () => {
   assert(BUNDLE.includes('• build '), 'bundle lacks the "• build " version-line fragment');
 });
 check('GREEN: built bundle contains a recent ISO build date', () => {
-  const stamps = BUNDLE.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g) || [];
+  // \.\d{1,7}Z: the workflow used to emit .NET's "o" format with SEVEN
+  // fractional digits (2026-11-25T01:23:45.1234567Z); the old \.\d{3}Z
+  // regex missed it (CI run 45479998849). The workflow now emits a
+  // canonical 3-digit timestamp, and the sim accepts 1–7 digits either way.
+  const stamps = BUNDLE.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{1,7}Z/g) || [];
   assert(stamps.length > 0, 'bundle contains no ISO-8601 UTC timestamp');
   const now = Date.now();
   const fresh = stamps.some((s) => {
