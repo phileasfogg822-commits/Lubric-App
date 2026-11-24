@@ -323,6 +323,7 @@ app.post('/api/auth/login', async (req, res) => {
       [user.id]
     );
 
+    user.permissions = parsePermissions(user.permissions);
     res.json({ token, user, shops: outlets.rows });
   } catch (err) {
     console.error('Login error:', err);
@@ -331,6 +332,48 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // ─── Auth: Me ───────────────────────────────────────────────────
+
+// --- Auth: Demo (one-click demo login) ---
+// POST /api/auth/demo mints a session for the public demo account
+// (demo@umarjamal.demo, shop 4 "Demo Lubricants") server-side, so no
+// password ever travels to the browser or appears in a URL. The demo shop
+// holds dummy/test data only (Umar, 2026-11-21). Returns the same shape
+// as /api/auth/login, minus password_hash. Guarded to shop 4 + cashier so
+// a future account change cannot turn this into a backdoor for a live shop.
+app.post('/api/auth/demo', async (req, res) => {
+  try {
+    const result = await query(
+      'SELECT id, shop_id, email, full_name, role, permissions, created_at FROM users WHERE email = $1 LIMIT 1',
+      ['demo@umarjamal.demo']
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Demo account not found' });
+    }
+    const user = result.rows[0];
+    if (user.shop_id !== 4 || user.role !== 'cashier') {
+      return res.status(403).json({ error: 'Demo account misconfigured' });
+    }
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role, shop_id: user.shop_id },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    const outlets = await query(
+      `SELECT us.shop_id, us.role, s.name, s.address, s.phone
+         FROM user_shops us
+         JOIN shops s ON s.id = us.shop_id
+        WHERE us.user_id = $1
+        ORDER BY us.shop_id`,
+      [user.id]
+    );
+    user.permissions = parsePermissions(user.permissions);
+    res.json({ token, user, shops: outlets.rows });
+  } catch (err) {
+    console.error('Demo login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.get('/api/auth/me', async (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   try {
@@ -339,7 +382,9 @@ app.get('/api/auth/me', async (req, res) => {
       [req.user.id]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'User not found' });
-    res.json({ user: result.rows[0] });
+    const meUser = result.rows[0];
+    meUser.permissions = parsePermissions(meUser.permissions);
+    res.json({ user: meUser });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
