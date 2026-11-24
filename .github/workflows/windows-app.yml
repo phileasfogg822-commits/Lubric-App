@@ -14,7 +14,11 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
+      # Depth 2, not the default 1: the version-display sim proves its
+      # red-before case against the previous commit (HEAD~1).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - uses: actions/setup-node@v4
         with:
@@ -54,15 +58,28 @@ jobs:
 
       # tsc + vite build for the web bundle (PWA stays on here — the Tauri
       # build below re-runs it with TAURI_ENV_PLATFORM set, which disables
-      # the service worker).
+      # the service worker). The build bakes its identity (src/lib/version.ts)
+      # from the environment when set, else from package.json + git in
+      # vite.config.ts — either way the real head SHA, never "unknown".
       - name: Typecheck + web build
-        run: npm run build
+        run: |
+          $env:VITE_GIT_SHA = $env:GITHUB_SHA
+          $env:VITE_BUILD_DATE = (Get-Date).ToUniversalTime().ToString("o")
+          $env:VITE_GIT_SUBJECT = git log -1 --format=%s
+          npm run build
+        shell: pwsh
+
+      # Needs the built bundle: proves the login screen shows the baked
+      # version + head SHA + build date (and that the previous build did not).
+      - name: Version display sim
+        run: node server/sim_version_display.js
+        shell: pwsh
 
       - name: Build Tauri NSIS installer
         run: npm run tauri:build
 
       # The installer name carries product + version, e.g.
-      # lubric.app_0.1.0_x64-setup.exe — record its hash so the delivered
+      # lubric.app_0.1.1_x64-setup.exe — record its hash so the delivered
       # file can be verified byte-for-byte after download.
       - name: Record installer SHA-256
         run: |

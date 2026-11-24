@@ -12,7 +12,7 @@ import ShopSelector from "./ShopSelector";
  * escapes so this file stays plain ASCII. `anyOf` opens an entry to a user who
  * holds any one of several keys — for pages that serve more than one module.
  */
-const NAV: { to: string; label: string; icon: string; permission?: string; anyOf?: string[]; adminOnly?: boolean }[] = [
+const NAV: { to: string; label: string; icon: string; permission?: string; anyOf?: string[]; adminOnly?: boolean; everyone?: boolean }[] = [
   { to: "/dashboard", label: "Dashboard", icon: "\u25A6", permission: "dashboard" },
   { to: "/reminders", label: "Reminders", icon: "\u23F0", permission: "dashboard" },
   { to: "/pos", label: "New Sale", icon: "\u{1F9FE}", permission: "pos.create" },
@@ -36,6 +36,10 @@ const NAV: { to: string; label: string; icon: string; permission?: string; anyOf
   // Owner-level screen: the API only lets admin/owner PATCH config, so gating
   // it on shop.manage would show non-admin managers a page that always 403s.
   { to: "/whitelabel", label: "White Label", icon: "\u{1F3A8}", permission: "shop.manage", adminOnly: true },
+  // Version is readable by every signed-in user, including cashiers — a
+  // permission-less entry would be hidden from non-admins by visible()
+  // (an empty permission list matches nobody), so it is flagged explicitly.
+  { to: "/version", label: "Version", icon: "\u2139", everyone: true },
 ];
 
 export default function Layout() {
@@ -55,6 +59,7 @@ export default function Layout() {
   /** Admin/owner see everything; everyone else needs the key on their list. */
   function visible(item: (typeof NAV)[number]) {
     if (item.adminOnly) return admin;
+    if (item.everyone) return true;
     if (admin) return true;
     const needed = item.anyOf ?? (item.permission ? [item.permission] : []);
     return needed.some((k) => perms.includes(k));

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
 import { dbSelect, isTauri } from "../../lib/db";
 import { getRememberedEmails } from "../../lib/loginMemory";
+import { versionLine } from "../../lib/version";
 
 /**
  * Sign-in.
@@ -102,6 +103,11 @@ export default function Login() {
         <div style={{ textAlign: "center", marginBottom: 24 }}>
           <div style={{ fontSize: "1.5rem", fontWeight: 800, color: "#0f172a" }}>LUBRIC POS</div>
           <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: 4 }}>lubric.app</div>
+          {/* Which build is installed — shown BEFORE login, so the installed
+              version can be checked without signing in (installers v1–v5 all
+              shipped version 0.1.0 and showed nothing, so a bug report could
+              not say which build it came from). */}
+          <div style={{ fontSize: "0.72rem", color: "#94a3b8", marginTop: 4 }}>{versionLine()}</div>
         </div>
 
         {users.length > 0 && (

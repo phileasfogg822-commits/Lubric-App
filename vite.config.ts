@@ -3,6 +3,33 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+// ── Build identity (src/lib/version.ts) ─────────────────────────────────────
+// Baked as VITE_* env vars so the app can show which build is installed
+// (login screen + Version page). Environment wins when set — CI sets them
+// from GITHUB_SHA on the build step — otherwise they come from package.json
+// + git, so a plain local `npm run build` bakes the real values too. A
+// missing git (tarball build) falls back to "unknown", never a crash.
+function gitOut(cmd: string): string {
+  try {
+    return execSync(cmd, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    return "";
+  }
+}
+const pkgVersion: string = (() => {
+  try {
+    return JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version ?? "dev";
+  } catch {
+    return "dev";
+  }
+})();
+process.env.VITE_APP_VERSION ??= pkgVersion;
+process.env.VITE_GIT_SHA ??= gitOut("git rev-parse HEAD") || "unknown";
+process.env.VITE_GIT_SUBJECT ??= gitOut("git log -1 --format=%s") || "unknown";
+process.env.VITE_BUILD_DATE ??= new Date().toISOString();
 
 // `tauri build` / `tauri dev` set TAURI_ENV_PLATFORM for beforeBuildCommand
 // and beforeDevCommand. A Tauri window is not a browser tab: a service

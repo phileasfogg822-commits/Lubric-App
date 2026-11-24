@@ -25,6 +25,7 @@ import Reports from "./modules/reports/Reports";
 import ProfitLoss from "./modules/profit/ProfitLoss";
 import Shop from "./modules/shop/Shop";
 import WhiteLabel from "./modules/settings/WhiteLabel";
+import Version from "./modules/settings/Version";
 import Inspections from "./modules/inspections/Inspections";
 import Purchase from "./modules/purchase/Purchase";
 import Team from "./modules/team/Team";
@@ -197,6 +198,9 @@ export default function App() {
             {/* White-label admin: branding, module manifest, feature flags.
                 Gated like shop settings; PATCHes are admin/owner on the API. */}
             <Route path="/whitelabel" element={<RequirePermission permission="shop.manage"><WhiteLabel /></RequirePermission>} />
+            {/* No permission gate: every signed-in user must be able to read
+                which build is installed when reporting a bug. */}
+            <Route path="/version" element={<Version />} />
 
             {/* Retired pages now folded into others. */}
             <Route path="/settings" element={<Navigate to="/shop" replace />} />
