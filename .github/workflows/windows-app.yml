@@ -47,6 +47,9 @@ jobs:
           node --experimental-strip-types server/sim_sale_default_warehouse_upgrade.js
           node --experimental-strip-types server/sim_sale_permissions.js
           node --experimental-strip-types server/sim_dashboard_permissions.js
+          node --experimental-strip-types server/sim_sale_locked_busy.js
+          node --experimental-strip-types server/sim_sale_duplicate_uuid.js
+          node --experimental-strip-types server/sim_leftover_container_pricing.js
         shell: pwsh
 
       # tsc + vite build for the web bundle (PWA stays on here — the Tauri
