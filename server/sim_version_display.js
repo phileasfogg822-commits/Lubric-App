@@ -68,9 +68,18 @@ function extractFunction(src, name) {
 // batch 5, where the version files already exist, and all four RED checks
 // failed (CI run 45487870858, 13/17). The dynamic ref stays correct for
 // every future commit; it needs the full history (workflow fetch-depth 0).
-const VERSION_INTRO = git('log --diff-filter=A --format=%H -1 -- src/lib/version.ts');
-assert(VERSION_INTRO, 'could not find the commit that added src/lib/version.ts');
-const RED_REF = git(`rev-parse ${VERSION_INTRO}^`);
+//
+// Windows/cmd safety (CI run 45488573261 failed the sim step again after
+// the first dynamic-ref fix): the git commands below avoid cmd's metacharacters
+// entirely — NO caret (^ is cmd's escape character: `rev-parse <sha>^`
+// mangles the closing quote of the cmd /c string and the command fails)
+// and NO %H format (parse the default `commit <sha>` header instead).
+// Tilde (~1) is already proven safe on the runner: the original sim ran
+// `git show HEAD~1:...` there.
+const logOut = git('log --diff-filter=A -1 -- src/lib/version.ts');
+const introMatch = logOut.match(/^commit ([0-9a-f]{40})/m);
+assert(introMatch, 'could not find the commit that added src/lib/version.ts');
+const RED_REF = git(`rev-parse ${introMatch[1]}~1`);
 check('RED: previous commit has no version.ts', () => {
   assert(gitShow(RED_REF, 'src/lib/version.ts') === null, `version.ts already existed at ${RED_REF}`);
 });
