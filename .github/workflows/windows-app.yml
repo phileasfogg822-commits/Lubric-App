@@ -14,11 +14,14 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      # Depth 2, not the default 1: the version-display sim proves its
-      # red-before case against the previous commit (HEAD~1).
+      # Full history, not the default shallow checkout: the version-display
+      # sim proves its red-before case against the commit BEFORE batch 5,
+      # resolved dynamically as the parent of the commit that added
+      # src/lib/version.ts — that ref sits further back with every
+      # follow-up commit, so a fixed fetch-depth would starve it again.
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:

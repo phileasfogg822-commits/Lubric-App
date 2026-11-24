@@ -16,8 +16,9 @@
  *        the baked version + head SHA + build date.
  *
  * The sim needs the built bundle, so it runs AFTER `npm run build` in the
- * gate (not with the pre-build sims). It needs HEAD~1, so CI checks out
- * with fetch-depth 2.
+ * gate (not with the pre-build sims). It proves the RED case against the
+ * commit BEFORE batch 5, resolved dynamically (see RED_REF below), so CI
+ * checks out the full history (fetch-depth 0).
  *
  * Run:  npm run build && node server/sim_version_display.js
  */
@@ -60,24 +61,33 @@ function extractFunction(src, name) {
   return src.slice(start, i + 1);
 }
 
-// ── RED: the previous commit had no version display anywhere ────────────────
+// ── RED: the commit before batch 5 had no version display anywhere ────────
+// The RED ref is the PARENT of the commit that ADDED src/lib/version.ts,
+// resolved dynamically. HEAD~1 was only correct for the batch-5 commit
+// itself (1b0c422): the follow-up fix commit (c5fdee4) shifted HEAD~1 onto
+// batch 5, where the version files already exist, and all four RED checks
+// failed (CI run 45487870858, 13/17). The dynamic ref stays correct for
+// every future commit; it needs the full history (workflow fetch-depth 0).
+const VERSION_INTRO = git('log --diff-filter=A --format=%H -1 -- src/lib/version.ts');
+assert(VERSION_INTRO, 'could not find the commit that added src/lib/version.ts');
+const RED_REF = git(`rev-parse ${VERSION_INTRO}^`);
 check('RED: previous commit has no version.ts', () => {
-  assert(gitShow('HEAD~1', 'src/lib/version.ts') === null, 'version.ts already existed at HEAD~1');
+  assert(gitShow(RED_REF, 'src/lib/version.ts') === null, `version.ts already existed at ${RED_REF}`);
 });
 check('RED: previous commit has no Version page', () => {
-  assert(gitShow('HEAD~1', 'src/modules/settings/Version.tsx') === null, 'Version.tsx already existed at HEAD~1');
+  assert(gitShow(RED_REF, 'src/modules/settings/Version.tsx') === null, `Version.tsx already existed at ${RED_REF}`);
 });
 check('RED: previous commit login has no version line', () => {
-  const old = gitShow('HEAD~1', 'src/modules/auth/Login.tsx');
-  assert(old !== null, 'could not read HEAD~1 Login.tsx — shallow checkout? (CI needs fetch-depth 2)');
-  assert(!old.includes('versionLine'), 'HEAD~1 Login.tsx already renders a version line');
+  const old = gitShow(RED_REF, 'src/modules/auth/Login.tsx');
+  assert(old !== null, `could not read ${RED_REF} Login.tsx — shallow checkout? (CI needs fetch-depth 0)`);
+  assert(!old.includes('versionLine'), `${RED_REF} Login.tsx already renders a version line`);
 });
 check('RED: previous commit has no /version route or sidebar entry', () => {
-  const oldApp = gitShow('HEAD~1', 'src/App.tsx');
-  const oldLayout = gitShow('HEAD~1', 'src/components/Layout.tsx');
-  assert(oldApp !== null && oldLayout !== null, 'could not read HEAD~1 App/Layout — shallow checkout?');
-  assert(!oldApp.includes('path="/version"'), 'HEAD~1 App.tsx already has a /version route');
-  assert(!oldLayout.includes('"/version"'), 'HEAD~1 Layout.tsx already has a Version entry');
+  const oldApp = gitShow(RED_REF, 'src/App.tsx');
+  const oldLayout = gitShow(RED_REF, 'src/components/Layout.tsx');
+  assert(oldApp !== null && oldLayout !== null, `could not read ${RED_REF} App/Layout — shallow checkout?`);
+  assert(!oldApp.includes('path="/version"'), `${RED_REF} App.tsx already has a /version route`);
+  assert(!oldLayout.includes('"/version"'), `${RED_REF} Layout.tsx already has a Version entry`);
 });
 
 // ── GREEN: version bumped to 0.1.1 everywhere ───────────────────────────────
