@@ -9,5 +9,40 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+
+  <script>
+// Demo auto-login (?demo=1): ALWAYS mints a FRESH demo session server-side
+// via POST /api/auth/demo (no password in this page or in the URL), stores it
+// exactly like a manual login does, then reloads into the app.
+// Always re-minting (never reusing a stored token) is deliberate: a session
+// stored before the permissions fix carries the old "0 Permissions" user
+// object, and the app never re-fetches /api/auth/me on load, so reusing it
+// would keep the stale permissions and shop name forever. On mint failure the
+// old session is left untouched and the error is only logged.
+(function () {
+  function cleanUrl() { try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {} }
+  function demoLogin() {
+    fetch('/api/auth/demo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(function (r) { if (!r.ok) throw new Error('demo login failed: HTTP ' + r.status); return r.json(); })
+      .then(function (j) {
+        if (!j || !j.token || !j.user) throw new Error('bad demo response');
+        ['lubric_token', 'lubric_user', 'lubric_shops', 'lubric_active_shop'].forEach(function (k) {
+          try { window.localStorage.removeItem(k); } catch (e) {}
+        });
+        window.localStorage.setItem('lubric_token', j.token);
+        window.localStorage.setItem('lubric_user', JSON.stringify(j.user));
+        if (Array.isArray(j.shops)) window.localStorage.setItem('lubric_shops', JSON.stringify(j.shops));
+        if (j.user.shop_id) window.localStorage.setItem('lubric_active_shop', String(j.user.shop_id));
+        cleanUrl();
+        window.location.reload();
+      })
+      .catch(function (e) { console.error('Demo auto-login failed:', e); });
+  }
+  try {
+    if (new URLSearchParams(window.location.search).get('demo') !== '1') return;
+    demoLogin();
+  } catch (e) { console.error('Demo auto-login failed:', e); }
+})();
+</script>
   </body>
 </html>

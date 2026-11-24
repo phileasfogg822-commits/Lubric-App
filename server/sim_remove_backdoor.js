@@ -8,10 +8,12 @@
  * password check.
  *
  * Safety, verified here:
- *  - The demo account is NOT affected: there is no /api/auth/demo endpoint
- *    anywhere in this repo (the portfolio demo login is a passwordless
- *    VPS-only endpoint), and no demo user exists in the repo — so the
- *    bypass was never on the demo login's path.
+ *  - The demo account is NOT affected by the backdoor removal: the bypass
+ *    lived in /api/auth/login only. POST /api/auth/demo (ported from the
+ *    VPS in bffadf8) is passwordless by design and guarded to shop 4 +
+ *    cashier — its guard, SELECT shape and response are verified by
+ *    server/sim_vps_port.js, and this sim checks it carries no password
+ *    comparison at all.
  *  - The seeded admin/cashier rows (migration 002_seed.sql) carry the
  *    bcrypt hash of "password", so they still log in via bcrypt.compare.
  *    The old bypass was the ONLY thing that made the published passwords
@@ -85,13 +87,15 @@ await checkAsync('old bypass password "cashier123" FAILS bcrypt against the seed
 await checkAsync('seeded admin still logs in via its real bcrypt hash ("password")', async () => {
   assert((await bcrypt.compare('password', seedHash)) === true, 'seeded hash does not verify');
 });
-check('no /api/auth/demo endpoint exists in this repo (demo login is VPS-only, untouched)', () => {
-  assert(!serverSrc.includes('/api/auth/demo'), 'demo endpoint found in server/index.js');
-  const allServer = fs.readdirSync('server').filter((f) => f.endsWith('.js') && !f.startsWith('sim_'));
-  for (const f of allServer) {
-    const src = fs.readFileSync('server/' + f, 'utf8');
-    assert(!src.includes('/api/auth/demo'), 'demo endpoint found in server/' + f);
-  }
+check('demo endpoint exists and stays passwordless (no password check on its path)', () => {
+  assert(serverSrc.includes("app.post('/api/auth/demo'"), 'demo endpoint missing from server/index.js');
+  const demoRegion = serverSrc.slice(
+    serverSrc.indexOf("app.post('/api/auth/demo'"),
+    serverSrc.indexOf("app.get('/api/auth/me'")
+  );
+  assert(demoRegion.length > 0, 'demo region not found');
+  assert(!/password\s*===/.test(demoRegion), 'plaintext password comparison on the demo path');
+  assert(!demoRegion.includes('bcrypt.compare'), 'demo endpoint must not check a password at all');
 });
 
 console.log(`\n${ok}/${total} checks passed`);
