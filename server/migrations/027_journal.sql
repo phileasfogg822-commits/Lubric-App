@@ -100,8 +100,22 @@ ON CONFLICT (uuid) DO NOTHING;
 -- which is why the opening entry's cash line has a null code. Matched by TYPE
 -- rather than by uuid, because overwriting a uuid would break every sync row
 -- that already references that account. Code is the stable key the app posts by.
-UPDATE accounts SET code = '1000' WHERE shop_id = 1 AND type = 'cash' AND code IS NULL;
-UPDATE accounts SET code = '1010' WHERE shop_id = 1 AND type = 'bank' AND code IS NULL;
+-- Code exactly one cash account and one bank account: the oldest uncoded one
+-- of each type, and only if that code is not already taken. The shop has more
+-- than one cash and bank account (demo/seeded tills), and the broad form this
+-- replaced (`... AND code IS NULL`) coded all of them '1000'/'1010' at once,
+-- which collides under the unique index below and takes the API down on the
+-- next boot — proven 2026-11-24, when the first restart after the journal
+-- landed crashed the API on duplicate key (1, 1000). The demo accounts keep
+-- code NULL; the partial index tolerates NULLs, and the journal's cash line
+-- picks the coded account. On a fresh database the oldest cash/bank rows are
+-- the originals, so this codes exactly those.
+UPDATE accounts SET code = '1000'
+ WHERE id = (SELECT id FROM accounts WHERE shop_id = 1 AND type = 'cash' AND code IS NULL ORDER BY id LIMIT 1)
+   AND NOT EXISTS (SELECT 1 FROM accounts WHERE shop_id = 1 AND code = '1000');
+UPDATE accounts SET code = '1010'
+ WHERE id = (SELECT id FROM accounts WHERE shop_id = 1 AND type = 'bank' AND code IS NULL ORDER BY id LIMIT 1)
+   AND NOT EXISTS (SELECT 1 FROM accounts WHERE shop_id = 1 AND code = '1010');
 
 -- A chart of accounts with two rows both called "Rent" is not a chart. Partial,
 -- so accounts a shop has not classified yet may still be code-less.
