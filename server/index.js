@@ -293,11 +293,12 @@ app.post('/api/auth/login', async (req, res) => {
     }
     const user = result.rows[0];
 
-    // Check password: bcrypt hash or demo passwords
+    // Check password: bcrypt hash only. A plaintext backdoor used to live
+    // here (a well-known password accepted for ANY account) — removed
+    // 2026-11-24: a published password must never log anyone in. The
+    // seeded admin/cashier rows still verify against their bcrypt hash.
     let valid = false;
-    if (password === 'admin123' || password === 'cashier123') {
-      valid = true;
-    } else if (user.password_hash) {
+    if (user.password_hash) {
       valid = await bcrypt.compare(password, user.password_hash);
     }
 
