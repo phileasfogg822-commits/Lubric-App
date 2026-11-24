@@ -7,6 +7,8 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
 import { dbSelect, dbGet, dbExecute } from "../../lib/db";
+import { useAuth } from "../../lib/auth";
+import { can } from "../../lib/permissions";
 import { currency, d } from "../../lib/format";
 import { Page } from "../../components/Page";
 import { ReminderModal, ReminderDraft } from "../../components/ReminderModal";
@@ -34,6 +36,14 @@ export default function Dashboard() {
   const [showReminderModal, setShowReminderModal] = useState(false);
   const [reminderDraft, setReminderDraft] = useState<ReminderDraft | null>(null);
   const navigate = useNavigate();
+  const { user, outlets, activeShopId } = useAuth();
+  const activeOutlet = outlets.find((o) => o.shop_id === activeShopId) ?? null;
+  const shopName = activeOutlet?.name ?? "My Shop";
+  // Vendor payables need purchase.manage or reports: a cashier opening the
+  // dashboard must not get a 403 on this one query (reported 2026-11-24),
+  // so it only runs for someone who may see payables, and the card hides
+  // for everyone else.
+  const canSeePayables = can(user, "purchase.manage") || can(user, "reports");
 
   const { data: todaySales } = useQuery({
     queryKey: ["today_sales"],
@@ -173,6 +183,7 @@ export default function Dashboard() {
   // Vendor payables falling due within 7 days.
   const { data: duePayables } = useQuery({
     queryKey: ["reminders", "payables"],
+    enabled: canSeePayables,
     queryFn: () =>
       dbSelect<{ id: number; vendor_name: string; amount: number; due_date: string | null }>(
         `SELECT vp.id, vd.name AS vendor_name, vp.amount, vp.due_date
@@ -275,7 +286,7 @@ export default function Dashboard() {
   const fieldInHand = (fieldQ.data?.collected ?? 0) - (fieldQ.data?.handed_over ?? 0);
 
   return (
-    <Page title="Dashboard" subtitle="Zafar Lubricants — Overview">
+    <Page title="Dashboard" subtitle={`${shopName} — Overview`}>
       {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 24 }}>
         {stats.map((s) => (
