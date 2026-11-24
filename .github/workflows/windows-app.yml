@@ -43,6 +43,8 @@ jobs:
           node --experimental-strip-types server/sim_remove_backdoor.js
           node --experimental-strip-types server/sim_stock_levels_unique.js
           node --experimental-strip-types server/sim_stock_levels_upgrade.js
+          node --experimental-strip-types server/sim_sale_default_warehouse.js
+          node --experimental-strip-types server/sim_sale_default_warehouse_upgrade.js
           node --experimental-strip-types server/sim_sale_permissions.js
           node --experimental-strip-types server/sim_dashboard_permissions.js
         shell: pwsh

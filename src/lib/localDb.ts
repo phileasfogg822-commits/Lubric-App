@@ -527,6 +527,37 @@ async function patchStockLevelsUnique(db: { execute: (s: string) => Promise<unkn
   );
 }
 
+/**
+ * Give every outlet a default warehouse — fresh installs and upgrades alike.
+ *
+ * The sale's stock statements fall back to the outlet's default warehouse
+ * (stock.ts resolves it in SQL with COALESCE), so a database with NO
+ * warehouse row makes the fallback NULL — and stock_levels.warehouse_id is
+ * NOT NULL, so a Windows sale dies with "NOT NULL constraint failed:
+ * stock_levels.warehouse_id" (reported 2026-11-24). LOCAL_SEED never
+ * created a warehouse (it only seeds the shop, accounts and the oil drum),
+ * so every local database ever made has an empty warehouses table.
+ *
+ * Mirrors server migration 033's values ('wh-default-1' / 'Main Store' /
+ * 'MAIN' for shop 1) and 035, which does the same for every shop on the
+ * server. Runs after LOCAL_SEED, so the shops it covers exist first.
+ * Idempotent: the NOT EXISTS clause skips any shop that already has an
+ * active default, and ON CONFLICT(uuid) covers a same-uuid row racing in
+ * from sync — a second launch changes nothing.
+ */
+async function ensureDefaultWarehouses(db: { execute: (s: string) => Promise<unknown> }): Promise<void> {
+  await db.execute(`
+    INSERT INTO warehouses (uuid, shop_id, name, code, is_default, active)
+    SELECT 'wh-default-' || s.id, s.id, 'Main Store', 'MAIN', 1, 1
+      FROM shops s
+     WHERE NOT EXISTS (
+       SELECT 1 FROM warehouses w
+        WHERE w.shop_id = s.id AND w.is_default = 1 AND w.active = 1
+     )
+    ON CONFLICT(uuid) DO NOTHING
+  `);
+}
+
 /** Run the local schema + seed once per app session (idempotent DDL). */
 export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>; select: (s: string) => Promise<unknown> }): Promise<void> {
   if (!schemaReady) {
@@ -550,6 +581,10 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       // The sale's stock_levels upsert needs (warehouse_id, product_id)
       // unique on databases created before the CREATE TABLE gained it.
       await patchStockLevelsUnique(db);
+      // Every outlet needs a default warehouse or the sale's stock
+      // statements fall back to NULL and die on stock_levels.warehouse_id
+      // NOT NULL (reported 2026-11-24). The seed never created one.
+      await ensureDefaultWarehouses(db);
       await db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_vendor_payables_uuid ON vendor_payables(uuid)"
       );

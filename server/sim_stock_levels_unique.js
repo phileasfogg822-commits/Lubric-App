@@ -89,7 +89,10 @@ await ensureLocalSchema(db);
 console.log('\nStock-levels uniqueness (fresh local DB + ON CONFLICT audit)');
 
 // ── the sale's stock statements, on a fresh database ──────────────────────
-run("INSERT INTO warehouses (id, shop_id, name, code, is_default, active) VALUES (1, 1, 'Main', 'MAIN', 1, 1)");
+// No warehouse row is inserted by hand any more: ensureLocalSchema now
+// creates the default warehouse for shop 1 (id 1, 'Main Store'/'MAIN'),
+// which is the row these checks run against — the sale below exercises the
+// repair path, not a fixture.
 run("INSERT INTO products (id, shop_id, name, stock_qty) VALUES (1, 1, 'GTX 4L', 10)");
 
 check('stockOut upsert targets (warehouse_id, product_id)', () => {
