@@ -27,7 +27,7 @@ const MODULES: { key: string; label: string; locked?: boolean }[] = [
   { key: "dashboard", label: "Dashboard", locked: true },
   { key: "pos.create", label: "Point of Sale" },
   { key: "sales_history", label: "Transactions" },
-  { key: "catalog.manage", label: "Catalog" },
+  { key: "catalog.manage", label: "Stock" },
   { key: "customers", label: "Customers" },
   { key: "vendors", label: "Vendors" },
   { key: "accounts", label: "Accounts" },

@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { isAdminRole } from "../lib/permissions";
+import { isAdminRole, parsePermissions } from "../lib/permissions";
 import { useConfigMap, useFlagRows, useBranding } from "../lib/useConfigFlags";
 import { moduleEnabled, pickFlag } from "../lib/configRules";
 import { NotificationBell } from "./NotificationBell";
@@ -23,7 +23,7 @@ const NAV: { to: string; label: string; icon: string; permission?: string; anyOf
   { to: "/field", label: "Field Activity", icon: "\u{1F4F1}", permission: "dashboard" },
   { to: "/reports", label: "Reports", icon: "\u{1F4C8}", permission: "reports" },
   { to: "/profit", label: "Profit & Loss", icon: "\u{1F4B0}", permission: "profit_loss" },
-  { to: "/catalog", label: "Catalog", icon: "\u{1F4E6}", permission: "catalog.manage" },
+  { to: "/catalog", label: "Stock", icon: "\u{1F4E6}", permission: "catalog.manage" },
   { to: "/customers", label: "Customers", icon: "\u{1F465}", permission: "customers" },
   { to: "/vendors", label: "Vendors", icon: "\u{1F3EA}", permission: "vendors" },
   { to: "/ledger", label: "Khata", icon: "\u{1F4D8}", anyOf: ["customers", "vendors"] },
@@ -42,7 +42,10 @@ export default function Layout() {
   const { user, logout, outlets, activeShopId } = useAuth();
   const navigate = useNavigate();
   const admin = isAdminRole(user?.role);
-  const perms: string[] = Array.isArray(user?.permissions) ? (user!.permissions as string[]) : [];
+  // users.permissions is a TEXT column holding a JSON string, so the raw
+  // value is never an array — parse it, or a cashier's sidebar is empty
+  // (Array.isArray on the string is false and the fallback was []).
+  const perms: string[] = parsePermissions(user?.permissions);
   const activeOutlet = outlets.find((o) => o.shop_id === activeShopId) ?? null;
   // One subscription per store for the whole nav — never a hook per entry.
   const cfg = useConfigMap();

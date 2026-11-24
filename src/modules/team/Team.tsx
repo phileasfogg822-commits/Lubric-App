@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import bcrypt from "bcryptjs";
-import { dbSelect, dbExecute, isTauri } from "../../lib/db";
+import { dbSelect, dbExecute } from "../../lib/db";
 import { Page } from "../../components/Page";
 import { Modal } from "../../components/Modal";
 import { FormField } from "../../components/FormField";
@@ -143,13 +143,13 @@ export default function Team() {
       const perms = serializePermissions(form.permissions);
       const name = form.full_name.trim();
       const email = form.email.trim();
-      // Windows standalone (Tauri): the local users table is the only
-      // credential store, so a password must be bcrypt-hashed before it is
-      // written — storing the raw password as password_hash would let
-      // anyone who opens the database file read every member's password.
-      // Server mode is unchanged: the server hashes on its own path.
-      const hashFor = async (plain: string) =>
-        isTauri() ? await bcrypt.hash(plain, 10) : plain;
+      // Passwords are ALWAYS bcrypt-hashed before they are written — in
+      // local (Tauri) mode AND in server mode. The server's generic SQL
+      // endpoint runs raw SQL and hashes nothing itself, so storing the
+      // plain password as password_hash would make the account unable to
+      // log in (login compares with bcrypt.compare, which fails against
+      // plaintext) and would leave the password readable in the database.
+      const hashFor = async (plain: string) => await bcrypt.hash(plain, 10);
 
       if (editId) {
         if (form.password.trim()) {

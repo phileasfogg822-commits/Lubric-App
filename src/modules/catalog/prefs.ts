@@ -1,4 +1,4 @@
-// View preferences for the Catalog page, persisted per device.
+// View preferences for the Stock page, persisted per device.
 // Deliberately localStorage (not the settings table): these are presentation
 // choices that belong to this browser, not to the shop's shared data.
 

@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { useAuth, AuthProvider } from "./lib/auth";
-import { isAdminRole } from "./lib/permissions";
+import { isAdminRole, parsePermissions } from "./lib/permissions";
 import { useConfigMap, useFlagRows, useBranding } from "./lib/useConfigFlags";
 import { isCapacitor, isTauri, getLocalDb, dbSelect } from "./lib/db";
 import { startSyncLoop } from "./lib/sync";
@@ -93,8 +93,11 @@ function RequirePermission({
     return <Navigate to="/dashboard" replace />;
   }
   if (isAdminRole(user.role)) return <>{children}</>;
-  if (!user.permissions || !Array.isArray(user.permissions)) return <Navigate to="/dashboard" replace />;
-  if (!needed.some((k) => (user.permissions as string[]).includes(k))) {
+  // users.permissions is a TEXT column holding a JSON string, so the raw
+  // value is never an array — parse it, or every protected route bounces
+  // a non-admin back to /dashboard (the old Array.isArray check failed).
+  const perms = parsePermissions(user.permissions);
+  if (!needed.some((k) => perms.includes(k))) {
     return <Navigate to="/dashboard" replace />;
   }
   return <>{children}</>;

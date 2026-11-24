@@ -49,7 +49,7 @@ export default function Catalog() {
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
       <input
         className="input"
-        placeholder="Search catalog…"
+        placeholder="Search stock…"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         style={{ maxWidth: 260 }}
@@ -126,7 +126,7 @@ export default function Catalog() {
   const shown = expanded ? panes.filter((p) => p.key === expanded) : panes;
 
   return (
-    <Page title="Catalog" subtitle="Products, services, containers and used oil — all in one place">
+    <Page title="Stock" subtitle="Products, services, containers and used oil — all in one place">
       {toolbar}
       {picker}
       <div

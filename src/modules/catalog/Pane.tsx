@@ -10,7 +10,7 @@ interface Props {
   children: ReactNode;
 }
 
-/** Consistent section chrome for each entity on the Catalog page. */
+/** Consistent section chrome for each entity on the Stock page. */
 export function Pane({ icon, label, count, tools, action, children }: Props) {
   return (
     <section style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>

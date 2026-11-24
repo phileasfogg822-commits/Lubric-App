@@ -47,7 +47,7 @@ export const MODULE_PERMISSIONS: PermissionDef[] = [
   { key: PERMISSIONS.DASHBOARD, label: "Dashboard" },
   { key: PERMISSIONS.POS_CREATE, label: "Create Bills (POS)", hint: "Generate new bills" },
   { key: PERMISSIONS.SALES_HISTORY, label: "Sales History", hint: "View bills & transactions" },
-  { key: PERMISSIONS.CATALOG_MANAGE, label: "Catalog", hint: "Products, services, containers, used oil" },
+  { key: PERMISSIONS.CATALOG_MANAGE, label: "Stock", hint: "Products, services, containers, used oil" },
   { key: PERMISSIONS.CUSTOMERS, label: "Customers" },
   { key: PERMISSIONS.VENDORS, label: "Vendors" },
   { key: PERMISSIONS.ACCOUNTS, label: "Accounts" },
