@@ -8,6 +8,7 @@ import { FormField } from "../../components/FormField";
 import { EmptyState } from "../../components/EmptyState";
 import { useAuth } from "../../lib/auth";
 import { PERMISSIONS } from "../../lib/permissions";
+import { TransactionDone, TransactionSpinner, useTransactionDone } from "../../components/TransactionDone";
 import { downloadCSV } from "../../lib/export";
 
 /**
@@ -62,6 +63,9 @@ export default function Expenses() {
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState(() => blankForm(1));
+  // Shared transaction feedback: "Saving…" on the button while the expense
+  // posts, then "Expense recorded" for exactly 2 seconds.
+  const tx = useTransactionDone();
 
   const { data: accounts } = useQuery({
     queryKey: ["exp-accounts"],
@@ -181,6 +185,7 @@ export default function Expenses() {
     onSuccess: () => {
       qc.invalidateQueries();
       close();
+      tx.showDone(editId ? "Expense updated" : "Expense recorded");
     },
     onError: (e: unknown) =>
       alert("Could not save expense: " + (e instanceof Error ? e.message : String(e))),
@@ -236,6 +241,7 @@ export default function Expenses() {
         </div>
       }
     >
+      <TransactionDone message={tx.done} />
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <input className="input" type="date" value={df} onChange={(e) => setDf(e.target.value)} title="From date" />
         <input className="input" type="date" value={dt} onChange={(e) => setDt(e.target.value)} title="To date" />
@@ -441,7 +447,7 @@ export default function Expenses() {
 
             <div style={{ display: "flex", gap: 8 }}>
               <button className="btn btn-primary" onClick={() => save.mutate()} disabled={save.isPending}>
-                {save.isPending ? "Saving..." : editId ? "Save Changes" : "Add Expense"}
+                {save.isPending ? <TransactionSpinner label="Saving…" /> : editId ? "Save Changes" : "Add Expense"}
               </button>
               <button className="btn btn-ghost" onClick={close}>Cancel</button>
             </div>

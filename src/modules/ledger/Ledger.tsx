@@ -7,6 +7,7 @@ import { currency, d } from "../../lib/format";
 import { downloadCSV, printReport } from "../../lib/export";
 import { Page } from "../../components/Page";
 import { EmptyState } from "../../components/EmptyState";
+import { TransactionDone, useTransactionDone } from "../../components/TransactionDone";
 import {
   fetchMonthly,
   fetchStatement,
@@ -54,6 +55,9 @@ export default function Ledger() {
   const [entry, setEntry] = useState<EntryKind | null>(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  // Shared transaction feedback: the modal already shows "Saving…" while
+  // the posting runs; this box confirms it for exactly 2 seconds after.
+  const tx = useTransactionDone();
 
   const period = useMemo(
     () => periodFor(periodKey, { from: custom.from, to: custom.to }),
@@ -158,6 +162,7 @@ export default function Ledger() {
     onSuccess: () => {
       setEntry(null);
       setError("");
+      tx.showDone(entry === "payment" ? "Payment posted" : "Bill posted");
       invalidate();
     },
     onError: (e: any) => setError(e?.message || String(e)),
@@ -258,6 +263,7 @@ export default function Ledger() {
         ))}
       </div>
 
+      <TransactionDone message={tx.done} />
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
         <div
           className="card"

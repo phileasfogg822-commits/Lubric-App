@@ -9,6 +9,7 @@ import { usePriceContext } from "./usePriceContext";
 import POSPrint from "./POSPrint";
 import { addProduct, addService, addContainer, updateQty, updatePrice, completeSale, releaseLeftoverToCustomer, leftoverLitres, packLitres, repriceAll, updateCapacity, toggleBillByCapacity, toggleLeftoverToContainers, tierPrice, type SaleVehicle } from "./POSCart";
 import Suggestions from "../../components/Suggestions";
+import { TransactionDone, TransactionSpinner, useTransactionDone } from "../../components/TransactionDone";
 import {
   buildPriceMemory,
   formatMemoryLine,
@@ -32,6 +33,10 @@ export default function POS() {
   const [mileage, setMileage] = useState(0);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  // Shared transaction feedback: loading ring on the Complete Sale button
+  // while the sale runs, then "Order #123 completed" for exactly 2 seconds.
+  // `success` stays for non-transaction notices (e.g. a customer tier change).
+  const tx = useTransactionDone();
   const [lastSale, setLastSale] = useState<{ orderId: number; items: CartItem[]; total: number; customerName: string; customerPhone: string; mileage: number; notes: string; vehicle: SaleVehicle | null } | null>(null);
   const [customerHistory, setCustomerHistory] = useState<any>(null);
   // Customer name type-ahead
@@ -445,8 +450,7 @@ export default function POS() {
     try {
       await releaseLeftoverToCustomer(expandedOrder, line.id, line.ref_id, Number(line.leftover_litres));
       setOrderDetail((rows: any[]) => rows.map((r) => r.id === line.id ? { ...r, leftover_to: "customer", leftover_released: true } : r));
-      setSuccess(`${line.leftover_litres}L released to ${customerName.trim() || "customer"} — removed from containers.`);
-      setTimeout(() => setSuccess(""), 4000);
+      tx.showDone(`${line.leftover_litres}L released to ${customerName.trim() || "customer"} — removed from containers.`);
     } catch (e: any) { setError(e.message || String(e)); }
   }
 
@@ -503,15 +507,16 @@ export default function POS() {
     setError("");
     setSuccess("");
     if (!cart.length) { setError("Cart is empty"); return; }
+    tx.setBusy(true);
     try {
       const vh = vehicle.registration.trim() ? vehicle : null;
       const oid = await completeSale(cart, user?.id ?? 1, customerId, paymentAccountId, total, mileage, notes, vh);
       setLastSale({ orderId: oid, items: [...cart], total, customerName: customerName.trim() || "Walk-in", customerPhone: customerPhone, mileage, notes, vehicle: vh });
-      setSuccess(`Order #${oid} completed!`);
+      tx.showDone(`Order #${oid} completed`);
       handleClear();
       qc.invalidateQueries();
-      setTimeout(() => setSuccess(""), 5000);
     } catch (e: any) { setError(e.message || String(e)); }
+    finally { tx.setBusy(false); }
   }
 
   // Printable data: live cart takes priority, otherwise the last completed sale
@@ -594,6 +599,7 @@ export default function POS() {
           <div style={{ padding:"6px 16px" }}>
             {error && <div className="alert alert-error" style={{ marginBottom:4, padding:"6px 10px", fontSize:"0.8rem" }}>{error}</div>}
             {success && <div className="alert alert-success" style={{ marginBottom:4, padding:"6px 10px", fontSize:"0.8rem" }}>{success}</div>}
+            <TransactionDone message={tx.done} />
           </div>
           <div style={{ flex:1, overflow:"auto", padding:"0 16px" }}>
             {cart.length === 0 ? (
@@ -696,7 +702,7 @@ export default function POS() {
                 <POSPrint cart={printItems} total={printTotal} customerName={printName} customerPhone={printPhone} orderId={printOrderId} notes={printNotes} vehicle={printVehicle} mileage={printMileage} />
               </div>
             )}
-            <button onClick={handleComplete} className="btn btn-success btn-full btn-lg" disabled={cart.length === 0}>Complete Sale</button>
+            <button onClick={handleComplete} className="btn btn-success btn-full btn-lg" disabled={cart.length === 0 || tx.busy}>{tx.busy ? <TransactionSpinner label="Completing sale…" /> : "Complete Sale"}</button>
           </div>
         </div>
         {customerHistory && (

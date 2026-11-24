@@ -6,6 +6,7 @@ import { newUuid } from "../../lib/uuid";
 import { Modal } from "../../components/Modal";
 import { FormField } from "../../components/FormField";
 import { EmptyState } from "../../components/EmptyState";
+import { TransactionDone, TransactionSpinner, useTransactionDone } from "../../components/TransactionDone";
 import { cardParts, type Column } from "./columns";
 import { Pane } from "./Pane";
 import EntityTable from "./EntityTable";
@@ -33,6 +34,9 @@ export default function ProductPane({ view, density, columns, search, compact, o
   const [show, setShow] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY });
+  // Shared transaction feedback: "Saving…" on the button while the product
+  // (and any stock count correction) posts, then confirmation for 2 seconds.
+  const tx = useTransactionDone();
 
   const { data: categories } = useQuery({ queryKey: ["categories"], queryFn: () => dbSelect<any>("SELECT id, name FROM categories ORDER BY name") });
   const { data: brands } = useQuery({ queryKey: ["brands"], queryFn: () => dbSelect<any>("SELECT id, name FROM brands ORDER BY name") });
@@ -154,7 +158,11 @@ export default function ProductPane({ view, density, columns, search, compact, o
         );
       }
     },
-    onSuccess: () => { qc.invalidateQueries(); close(); },
+    onSuccess: () => {
+      qc.invalidateQueries();
+      close();
+      tx.showDone(editId ? "Product updated" : "Product added");
+    },
     onError: (e: any) => alert("Error saving product: " + (e?.message || e)),
   });
 
@@ -197,6 +205,7 @@ export default function ProductPane({ view, density, columns, search, compact, o
       tools={compact && all.length > 6 && onViewAll ? <button className="btn btn-ghost btn-sm" onClick={onViewAll}>View all →</button> : undefined}
       action={<button className="btn btn-primary btn-sm" onClick={openAdd}>+ Add Product</button>}
     >
+      <TransactionDone message={tx.done} />
       {view === "grid" ? (
         <EntityGrid title={title} columns={cards} rows={shown} density={density} loading={isLoading}
           actions={rowActions} isDimmed={(r) => !r.active}
@@ -253,7 +262,7 @@ export default function ProductPane({ view, density, columns, search, compact, o
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
             <button className="btn btn-primary" onClick={() => save.mutate()} disabled={!form.name.trim() || save.isPending}>
-              {save.isPending ? "Saving…" : editId ? "Save Changes" : "Add Product"}
+              {save.isPending ? <TransactionSpinner label="Saving…" /> : editId ? "Save Changes" : "Add Product"}
             </button>
             <button className="btn btn-ghost" onClick={close}>Cancel</button>
           </div>

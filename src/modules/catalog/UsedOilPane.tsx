@@ -4,6 +4,7 @@ import { dbSelect, dbTransaction } from "../../lib/db";
 import { Modal } from "../../components/Modal";
 import { FormField } from "../../components/FormField";
 import { EmptyState } from "../../components/EmptyState";
+import { TransactionDone, TransactionSpinner, useTransactionDone } from "../../components/TransactionDone";
 import { cardParts, type Column } from "./columns";
 import { Pane } from "./Pane";
 import EntityTable from "./EntityTable";
@@ -24,6 +25,9 @@ export default function UsedOilPane({ view, density, columns, search, compact, o
   const [show, setShow] = useState(false);
   const [mode, setMode] = useState<"collected" | "disposed">("collected");
   const [form, setForm] = useState({ litres: "", notes: "" });
+  // Shared transaction feedback: "Saving…" on the button while the drum
+  // moves, then "Collection recorded" for exactly 2 seconds.
+  const tx = useTransactionDone();
 
   const { data: drum } = useQuery({ queryKey: ["catalog_drum"], queryFn: () => dbSelect<any>("SELECT * FROM used_oil_drum WHERE id = 1").then((r) => r[0]) });
   const { data: rows, isLoading } = useQuery({
@@ -47,7 +51,11 @@ export default function UsedOilPane({ view, density, columns, search, compact, o
         { sql: "INSERT INTO used_oil_log (drum_id, litres, type, notes) VALUES (1, $1, $2, $3)", params: [litres, mode, form.notes || (mode === "collected" ? "Drop-off" : "")] },
       ]);
     },
-    onSuccess: () => { qc.invalidateQueries(); close(); },
+    onSuccess: () => {
+      qc.invalidateQueries();
+      close();
+      tx.showDone(mode === "collected" ? "Collection recorded" : "Disposal recorded");
+    },
     onError: (e: any) => alert("Error: " + (e?.message || e)),
   });
 
@@ -81,6 +89,7 @@ export default function UsedOilPane({ view, density, columns, search, compact, o
         </div>
       }
     >
+      <TransactionDone message={tx.done} />
       {view === "grid" ? (
         <EntityGrid title={title} columns={cards} rows={shown} density={density} loading={isLoading}
           isDimmed={(r) => (r.litres ?? 0) < 0}
@@ -102,7 +111,7 @@ export default function UsedOilPane({ view, density, columns, search, compact, o
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
             <button className="btn btn-primary" onClick={() => record.mutate()} disabled={!form.litres || record.isPending}>
-              {record.isPending ? "Saving…" : mode === "collected" ? "Record Collection" : "Record Disposal"}
+              {record.isPending ? <TransactionSpinner label="Saving…" /> : mode === "collected" ? "Record Collection" : "Record Disposal"}
             </button>
             <button className="btn btn-ghost" onClick={close}>Cancel</button>
           </div>
