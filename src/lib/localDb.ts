@@ -384,7 +384,12 @@ CREATE TABLE IF NOT EXISTS stock_levels (
   warehouse_id INTEGER NOT NULL,
   product_id   INTEGER NOT NULL,
   qty          REAL DEFAULT 0,
-  updated_at   TEXT
+  updated_at   TEXT,
+  -- The sale's per-warehouse cache upsert conflicts on (warehouse_id,
+  -- product_id), so the pair must be unique — without this, a Windows sale
+  -- dies with "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE
+  -- constraint" (reported 2026-11-24). Mirrors migration 033's server table.
+  UNIQUE (warehouse_id, product_id)
 );
 CREATE INDEX IF NOT EXISTS idx_stock_levels_product ON stock_levels(product_id);
 `;
@@ -491,6 +496,37 @@ async function patchSyncColumns(db: { select: (s: string) => Promise<unknown>; e
   }
 }
 
+/**
+ * Give an EXISTING local database the stock_levels uniqueness a fresh install
+ * gets from the CREATE TABLE above. CREATE TABLE IF NOT EXISTS never alters a
+ * table it did not create, so a database made before this fix has a
+ * stock_levels with no unique constraint — and the sale's upsert on
+ * (warehouse_id, product_id) dies at prepare time with "ON CONFLICT clause
+ * does not match any PRIMARY KEY or UNIQUE constraint".
+ *
+ * Duplicates are merged first (qty summed into the lowest-id row, the rest
+ * deleted) so the index creation itself cannot fail. A database that never
+ * had duplicates is untouched: each group has one row, whose qty sums to
+ * itself, and the DELETE matches nothing — so this is a no-op on re-run.
+ */
+async function patchStockLevelsUnique(db: { execute: (s: string) => Promise<unknown> }): Promise<void> {
+  await db.execute(`
+    UPDATE stock_levels SET qty = (
+      SELECT COALESCE(SUM(s2.qty), 0) FROM stock_levels s2
+       WHERE s2.product_id = stock_levels.product_id
+         AND s2.warehouse_id IS stock_levels.warehouse_id
+    ) WHERE id IN (
+      SELECT MIN(id) FROM stock_levels GROUP BY warehouse_id, product_id
+    )`);
+  await db.execute(`
+    DELETE FROM stock_levels WHERE id NOT IN (
+      SELECT MIN(id) FROM stock_levels GROUP BY warehouse_id, product_id
+    )`);
+  await db.execute(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_levels_wh_prod ON stock_levels(warehouse_id, product_id)"
+  );
+}
+
 /** Run the local schema + seed once per app session (idempotent DDL). */
 export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>; select: (s: string) => Promise<unknown> }): Promise<void> {
   if (!schemaReady) {
@@ -511,6 +547,9 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       await db.execute(LOCAL_SEED);
       // Columns first, then the index that depends on them.
       await patchSyncColumns(db);
+      // The sale's stock_levels upsert needs (warehouse_id, product_id)
+      // unique on databases created before the CREATE TABLE gained it.
+      await patchStockLevelsUnique(db);
       await db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_vendor_payables_uuid ON vendor_payables(uuid)"
       );
