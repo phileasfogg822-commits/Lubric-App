@@ -64,7 +64,8 @@ function dayOf(v: unknown) {
 
 export default function SalesHistory() {
   const qc = useQueryClient();
-  const { hasPermission } = useAuth();
+  const { hasPermission, outlets, activeShopId } = useAuth();
+  const shopName = outlets.find((o) => o.shop_id === activeShopId)?.name ?? "My Shop";
 
   const canEdit = hasPermission(PERMISSIONS.BILL_EDIT);
   const canVoid = hasPermission(PERMISSIONS.BILL_VOID);
@@ -530,7 +531,7 @@ export default function SalesHistory() {
         <div className="report-print" style={{ padding: 24, background: "white" }}>
         <div style={{ borderBottom: "2px solid #0f172a", paddingBottom: 8, marginBottom: 12 }}>
           <div style={{ fontSize: "1.35rem", fontWeight: 800, letterSpacing: "0.04em" }}>LUBRIC POS</div>
-          <div style={{ fontSize: "0.8rem", color: "#475569" }}>Zafar Lubricants</div>
+          <div style={{ fontSize: "0.8rem", color: "#475569" }}>{shopName}</div>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>

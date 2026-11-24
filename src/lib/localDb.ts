@@ -16,7 +16,7 @@ import { ensureOutboxTriggers } from "./outbox.ts";
 
 // Consolidated local schema, part 1 of 2 (SQLite dialect).
 export const LOCAL_SCHEMA = `
-CREATE TABLE IF NOT EXISTS shops (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT DEFAULT 'Zafar Lubricants', address TEXT DEFAULT '', phone TEXT DEFAULT '', currency TEXT DEFAULT 'PKR', language TEXT DEFAULT 'en', used_oil_drum_capacity REAL DEFAULT 200, manual_price_allowed INTEGER DEFAULT 0, wholesale_mode TEXT DEFAULT 'auto', created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS shops (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT DEFAULT 'My Shop', address TEXT DEFAULT '', phone TEXT DEFAULT '', currency TEXT DEFAULT 'PKR', language TEXT DEFAULT 'en', used_oil_drum_capacity REAL DEFAULT 200, manual_price_allowed INTEGER DEFAULT 0, wholesale_mode TEXT DEFAULT 'auto', created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, full_name TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'cashier', permissions TEXT DEFAULT '[]', created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS role_permissions (role TEXT NOT NULL, permission_key TEXT NOT NULL, PRIMARY KEY(role, permission_key));
 CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, name TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')));
@@ -120,7 +120,7 @@ CREATE INDEX IF NOT EXISTS idx_alloc_payment ON payable_allocations(payment_uuid
 `;
 
 const LOCAL_SEED = `
-INSERT OR IGNORE INTO shops (id, name, currency) VALUES (1, 'Zafar Lubricants', 'PKR');
+INSERT OR IGNORE INTO shops (id, name, currency) VALUES (1, 'My Shop', 'PKR');
 INSERT OR IGNORE INTO accounts (id, name, type) VALUES (1, 'Shop Cash Drawer', 'cash');
 INSERT OR IGNORE INTO accounts (id, name, type) VALUES (2, 'Bank Account', 'bank');
 INSERT OR IGNORE INTO used_oil_drum (id, capacity) VALUES (1, 200);

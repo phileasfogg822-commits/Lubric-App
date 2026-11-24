@@ -5,7 +5,7 @@
 -- label on a customer - it is a LAYER that decides the price, sitting above the
 -- product's normal price and below a price agreed with one named customer:
 --
---   1. party_prices    Zafar agreed 3,800 for the GTX   (most specific)
+--   1. party_prices    a customer agreed 3,800 for the GTX   (most specific)
 --   2. GROUP           his group: wholesale / returning / walking
 --   3. price list      assigned directly, or the group's own list
 --   4. base price      products.price_returning         (normal price)

@@ -4,7 +4,7 @@
 -- denormalised running totals with no history behind them, and
 -- account_transactions has no customer/vendor link at all, so it was
 -- impossible to answer what a field user actually asks:
---   * "show me everything with Zafar Iqbal between March and June"
+--   * "show me everything with Ahmed Raza between March and June"
 --   * "is he buying more or less than last month?"
 --   * "print me his statement and WhatsApp it to him"
 --

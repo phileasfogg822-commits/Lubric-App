@@ -74,7 +74,7 @@ await check('a list price beats the legacy columns', () => {
 });
 
 await check('an individually agreed price beats everything', () => {
-  // "Zafar gets 3,800 for the GTX" - the most personal answer given, so the
+  // "A customer gets 3,800 for the GTX" - the most personal answer given, so the
   // one a shopkeeper expects to win.
   const r = resolvePrice(P, 'walking', 1, {
     product: tierProduct,

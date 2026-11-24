@@ -4,7 +4,7 @@
 -- at a customer. That leaves a real hole: any collection that syncs in the
 -- window between a phone's push and a server deploy is banked as cash and never
 -- linked to the customer's Khata. It is exactly what happened to the PKR 40,000
--- collection from Zafar Iqbal - pushed at 06:28:53, API restarted with the
+-- collection from Ahmed Raza - pushed at 06:28:53, API restarted with the
 -- posting code at 06:39:58, and the cash backfill claimed it at 06:39:59.
 --
 -- So this completes the link for every collection that has been banked but not

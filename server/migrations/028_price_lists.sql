@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS party_price_lists (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ppl_unique ON party_price_lists (party_type, party_id);
 
 -- An individually agreed price, which beats the list. This is what a shop means
--- by "Zafar gets 3,800 for the GTX" - one customer, one product, one number.
+-- by "a customer gets 3,800 for the GTX" - one customer, one product, one number.
 CREATE TABLE IF NOT EXISTS party_prices (
   id         SERIAL PRIMARY KEY,
   shop_id    INTEGER NOT NULL REFERENCES shops(id),

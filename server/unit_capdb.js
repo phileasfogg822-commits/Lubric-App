@@ -78,7 +78,7 @@ check('objects and arrays normalize to their JSON text', () => {
 });
 
 check('strings, numbers and null pass through untouched', () => {
-  eq(normalizeBindValue('Zafar'), 'Zafar');
+  eq(normalizeBindValue('Ali'), 'Ali');
   eq(normalizeBindValue(42), 42);
   eq(normalizeBindValue(1.5), 1.5);
   eq(normalizeBindValue(null), null);

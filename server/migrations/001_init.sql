@@ -4,7 +4,7 @@
 -- Shops
 CREATE TABLE IF NOT EXISTS shops (
   id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL DEFAULT 'Zafar Lubricants',
+  name TEXT NOT NULL DEFAULT 'My Shop',
   address TEXT DEFAULT '',
   phone TEXT DEFAULT '',
   currency TEXT DEFAULT 'PKR',

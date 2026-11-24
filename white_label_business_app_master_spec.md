@@ -140,10 +140,10 @@ Example:
 
 ```text
 Brand:
-Zafar Lubricants
+My Shop
 
 Package:
-com.zafarlubricants.business
+com.myshop.business
 
 Primary Color:
 #C49834
@@ -219,7 +219,7 @@ Example:
 
 ```text
 Umar Trading
-Zafar Lubricants
+My Shop
 XYZ Services
 ```
 
@@ -227,7 +227,7 @@ Business switcher:
 
 ```text
 Current Business
-Zafar Lubricants ▼
+My Shop ▼
 ```
 
 Each business must have isolated:
@@ -391,7 +391,7 @@ Recommended home dashboard:
 
 ```text
 Good Morning
-Zafar Lubricants
+My Shop
 
 Today's Sales
 Rs 128,500
@@ -2315,7 +2315,7 @@ Company may expose selected inventory publicly.
 Example:
 
 ```text
-zafarlubricants.yourapp.com
+myshop.yourapp.com
 ```
 
 Product card:

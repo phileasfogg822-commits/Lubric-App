@@ -1,7 +1,7 @@
 -- Seed data for Lubric POS (PostgreSQL)
 -- Uses ON CONFLICT DO NOTHING instead of INSERT OR IGNORE
 
-INSERT INTO shops (id, name, currency) VALUES (1, 'Zafar Lubricants', 'PKR') ON CONFLICT (id) DO NOTHING;
+INSERT INTO shops (id, name, currency) VALUES (1, 'My Shop', 'PKR') ON CONFLICT (id) DO NOTHING;
 INSERT INTO accounts (id, name, type) VALUES (1, 'Shop Cash Drawer', 'cash') ON CONFLICT (id) DO NOTHING;
 INSERT INTO accounts (id, name, type) VALUES (2, 'Bank Account', 'bank') ON CONFLICT (id) DO NOTHING;
 INSERT INTO used_oil_drum (id, capacity) VALUES (1, 200) ON CONFLICT (id) DO NOTHING;

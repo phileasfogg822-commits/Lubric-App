@@ -135,7 +135,7 @@ export default function FirstRunSetup() {
             <input
               type="text"
               className="input"
-              placeholder="e.g. Zafar Lubricants"
+              placeholder="e.g. My Shop"
               value={businessName}
               onChange={(e) => setBusinessName(e.target.value)}
               autoFocus

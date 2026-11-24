@@ -10,7 +10,7 @@
  * Precedence, most specific first. Each step is "the more personal answer wins",
  * which is how a shop actually thinks about price:
  *
- *   1. party_prices       Zafar agreed 3,800 for the GTX. One customer, one
+ *   1. party_prices       A customer agreed 3,800 for the GTX. One customer, one
  *                         product, one number - and it beats everything.
  *   2. price_list_items   the price list this customer is assigned to, which
  *                         may carry a quantity break ("10 or more").

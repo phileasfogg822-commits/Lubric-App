@@ -1,4 +1,4 @@
-INSERT OR IGNORE INTO shops (id, name, currency) VALUES (1, 'Zafar Lubricants', 'PKR');
+INSERT OR IGNORE INTO shops (id, name, currency) VALUES (1, 'My Shop', 'PKR');
 INSERT OR IGNORE INTO accounts (id, name, type) VALUES (1, 'Shop Cash Drawer', 'cash');
 INSERT OR IGNORE INTO accounts (id, name, type) VALUES (2, 'Bank Account', 'bank');
 INSERT OR IGNORE INTO used_oil_drum (id, capacity) VALUES (1, 200);

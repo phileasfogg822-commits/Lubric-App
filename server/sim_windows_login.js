@@ -72,7 +72,7 @@ check('fresh install has an EMPTY users table (first-run setup is required)', ()
 
 check('fresh install still seeds shop, accounts and drum', () => {
   const shop = run('SELECT name FROM shops WHERE id = 1');
-  assert(shop[0].name === 'Zafar Lubricants', 'shop seed missing: ' + JSON.stringify(shop));
+  assert(shop[0].name === 'My Shop', 'shop seed missing: ' + JSON.stringify(shop));
   assert(run('SELECT COUNT(*) AS c FROM accounts')[0].c >= 2, 'accounts seed missing');
 });
 

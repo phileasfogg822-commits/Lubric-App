@@ -34,7 +34,7 @@
 
 -- ── the outlet that already exists ──────────────────────────────────────────
 INSERT INTO shops (id, name, address, phone, currency, language)
-VALUES (1, 'Zafar Lubricants', 'Main Bazaar Road, Lahore', '0300-1234567', 'PKR', 'en')
+VALUES (1, 'My Shop', 'Main Bazaar Road, Lahore', '0300-1234567', 'PKR', 'en')
 ON CONFLICT (id) DO NOTHING;
 
 -- Placeholder second outlet, so the filter and the isolation test have something
@@ -42,7 +42,7 @@ ON CONFLICT (id) DO NOTHING;
 -- isolation is more useful than one with sample rows that could be mistaken for
 -- the shop's real stock.
 INSERT INTO shops (id, name, address, phone, currency, language)
-VALUES (2, 'Zafar Lubricants - Outlet 2', NULL, NULL, 'PKR', 'en')
+VALUES (2, 'My Shop - Outlet 2', NULL, NULL, 'PKR', 'en')
 ON CONFLICT (id) DO NOTHING;
 
 -- ── which users may enter which outlet ──────────────────────────────────────

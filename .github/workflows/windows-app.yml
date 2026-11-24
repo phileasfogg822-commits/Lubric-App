@@ -27,7 +27,9 @@ jobs:
 
       # Counted unit suite (offline-safe only — the e2e_* suites that need a
       # live API + Postgres are NOT run here). Each unit file prints N/M
-      # passed and exits 1 on failure, so the loop is the gate.
+      # passed and exits 1 on failure, so the loop is the gate. The sims
+      # replay exact app statements against the real schema / server
+      # permissions code; each prints N/M and exits 1 on failure.
       - name: Unit tests gate the build
         run: |
           foreach ($f in Get-ChildItem server/unit_*.js) {
@@ -36,6 +38,13 @@ jobs:
           }
           node --experimental-strip-types server/e2e_ledger_sqlite.js
           node --experimental-strip-types server/sim_windows_login.js
+          node --experimental-strip-types server/sim_windows_v2_permissions.js
+          node --experimental-strip-types server/sim_vps_port.js
+          node --experimental-strip-types server/sim_remove_backdoor.js
+          node --experimental-strip-types server/sim_stock_levels_unique.js
+          node --experimental-strip-types server/sim_stock_levels_upgrade.js
+          node --experimental-strip-types server/sim_sale_permissions.js
+          node --experimental-strip-types server/sim_dashboard_permissions.js
         shell: pwsh
 
       # tsc + vite build for the web bundle (PWA stays on here — the Tauri

@@ -37,7 +37,7 @@ The migrations ship with demo data so the POS is usable immediately:
 | `customers` | 4 | One per tier: returning / wholesale / walking |
 | `orders` + `order_items` | 3 / 10 | Past sales, so customer history has content |
 
-**Test the POS with these names:** `Zafar Iqbal` (returning), `Hassan Traders`
+**Test the POS with these names:** `Ahmed Raza` (returning), `Hassan Traders`
 (wholesale, has 12,500 credit), `Ali Raza` (walking), `Metro Workshop` (wholesale).
 
 Everything is loaded from `server/migrations/003_sample_data.sql`. It uses explicit

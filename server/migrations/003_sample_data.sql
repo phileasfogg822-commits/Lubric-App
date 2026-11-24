@@ -42,7 +42,7 @@ ON CONFLICT (id) DO NOTHING;
 
 -- ── Customers (one per pricing tier, so the history panel can be tested) ─────
 INSERT INTO customers (id, name, phone, customer_type, credit_balance, last_visit_at) VALUES
-  (1, 'Zafar Iqbal',   '0300-1234567', 'returning',     0, '2026-02-14'),
+  (1, 'Ahmed Raza',    '0300-1234567', 'returning',     0, '2026-02-14'),
   (2, 'Hassan Traders', '0321-7654321', 'wholesale', 12500, '2026-02-12'),
   (3, 'Ali Raza',      '0333-1112222', 'walking',       0, NULL),
   (4, 'Metro Workshop', '0345-9998888', 'wholesale',    0, '2026-02-11')
