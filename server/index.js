@@ -131,9 +131,15 @@ const READ_PERMISSIONS = {
 const WRITE_PERMISSIONS = {
   products: [P.CATALOG_MANAGE],
   services: [P.CATALOG_MANAGE],
-  containers: [P.CATALOG_MANAGE],
-  container_splits: [P.CATALOG_MANAGE],
-  used_oil_log: [P.CATALOG_MANAGE],
+  // Sale side-effect tables: a till writes these while completing a sale
+  // (shelved leftover oil, a partial-container drawdown, a used-oil
+  // drop-off), so POS_CREATE is accepted alongside CATALOG_MANAGE. Direct
+  // price/product edits are still catalog-only — see the stock_qty-only
+  // carve-out for products in requiredPermissions below.
+  containers: [P.CATALOG_MANAGE, P.POS_CREATE],
+  container_splits: [P.CATALOG_MANAGE, P.POS_CREATE],
+  used_oil_log: [P.CATALOG_MANAGE, P.POS_CREATE],
+  used_oil_drum: [P.CATALOG_MANAGE, P.POS_CREATE],
   brands: [P.CATALOG_MANAGE],
   categories: [P.CATALOG_MANAGE],
   customers: [P.CUSTOMERS, P.POS_CREATE],
@@ -205,6 +211,26 @@ function requiredPermissions(sql) {
     }
     if (target === 'order_items') {
       return /^insert/.test(trimmed) ? [P.POS_CREATE] : [P.BILL_EDIT];
+    }
+    if (target === 'products') {
+      // A sale moves stock through the ledger; the only products write it
+      // needs is the stock_qty cache bump
+      // (`UPDATE products SET stock_qty = COALESCE(stock_qty, 0) + $1 ...`).
+      // A POS holder may make exactly that write — any other products
+      // UPDATE (price, name, a stock reset) stays catalog-only.
+      // The SET clause is split on commas AFTER parenthesised groups are
+      // removed: COALESCE(stock_qty, 0) carries a comma of its own, and a
+      // naive split would read it as a second assignment.
+      const setClause = (trimmed.match(/^update\s+"?products"?\s+set\s+(.+?)\s+where\b/) || [])[1];
+      let flat = setClause || '';
+      let prev;
+      do { prev = flat; flat = flat.replace(/\([^()]*\)/g, ''); } while (flat !== prev);
+      if (
+        setClause &&
+        flat.split(',').every((assign) => /^\s*"?stock_qty"?\s*=/.test(assign))
+      ) {
+        return [P.POS_CREATE, P.CATALOG_MANAGE];
+      }
     }
     return WRITE_PERMISSIONS[target] || null;
   }
