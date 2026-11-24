@@ -18,6 +18,7 @@
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getRememberedEmails, rememberEmail, stripPasswordHash } from '../src/lib/loginMemory.ts';
 
 // ── a localStorage shim, installed before any loginMemory call ─────────────
@@ -94,7 +95,10 @@ check('stripPasswordHash blanks the hash and keeps everything else', () => {
 });
 
 // ── code-level assertions on the real sources ─────────────────────────────
-const ROOT = new URL('..', import.meta.url).pathname;
+// fileURLToPath, not .pathname: a file URL's pathname is "/D:/..." on Windows,
+// which is not a filesystem path and makes every read below fail with ENOENT
+// (proven by CI run 45383463436 — the same test passes on Linux).
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 function read(rel) {
   return readFileSync(join(ROOT, rel), 'utf8');
 }
