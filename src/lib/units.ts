@@ -10,8 +10,12 @@ import type { Product } from "./types";
  *
  * Extracted here so it can be tested. The POS re-exports it, so every existing
  * call site is unchanged.
+ *
+ * The parameter is structural ({ packing }) rather than the full Product:
+ * pricing.ts needs the pack size of the container's product from a search row
+ * that carries the packing string but is not a whole Product.
  */
-export function packLitres(p?: Product | null): number {
+export function packLitres(p?: { packing?: unknown } | null): number {
   const raw = String((p as any)?.packing ?? "").trim().toLowerCase();
   // Reject a negative pack before parsing. The strip below removes every
   // non-digit, including the minus, so "-4L" would otherwise parse as 4 LITRES

@@ -545,6 +545,33 @@ async function patchStockLevelsUnique(db: { execute: (s: string) => Promise<unkn
  * active default, and ON CONFLICT(uuid) covers a same-uuid row racing in
  * from sync — a second launch changes nothing.
  */
+/**
+ * Repair duplicate order_items uuids before the unique index is created.
+ *
+ * A duplicate uuid makes CREATE UNIQUE INDEX fail with "UNIQUE constraint
+ * failed: order_items.uuid" (2067) — and because ensureLocalSchema throws,
+ * every later read fails too, so the sales history shows nothing ("no
+ * previous data is shown", reported 2026-11-24 alongside the 2067). The
+ * duplicates themselves come from a sale's statements being executed twice
+ * with the same frozen uuids (a double-submit before the ref guard, or a
+ * retry re-running a committed cart).
+ *
+ * The repair keeps the lowest-id row per uuid (the original sale line) and
+ * NULLs the rest — non-destructive, so no sale history is lost, and NULLs
+ * are distinct under a unique index, so the index creation cannot fail.
+ * The nulled rows cannot sync as new rows: the outbox triggers fire only
+ * WHEN NEW.uuid IS NOT NULL (outbox.ts), and this UPDATE is the only write
+ * that touches them. Idempotent: a database with no duplicates matches
+ * nothing and the index creation proceeds as before.
+ */
+async function patchOrderItemsUuidDuplicates(db: { execute: (s: string) => Promise<unknown> }): Promise<void> {
+  await db.execute(`
+    UPDATE order_items SET uuid = NULL
+     WHERE uuid IS NOT NULL AND id NOT IN (
+       SELECT MIN(id) FROM order_items WHERE uuid IS NOT NULL GROUP BY uuid
+     )`);
+}
+
 async function ensureDefaultWarehouses(db: { execute: (s: string) => Promise<unknown> }): Promise<void> {
   await db.execute(`
     INSERT INTO warehouses (uuid, shop_id, name, code, is_default, active)
@@ -588,6 +615,12 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       await db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_vendor_payables_uuid ON vendor_payables(uuid)"
       );
+      // A database that already holds duplicate order_items uuids would fail
+      // the index below with 2067 — and take the whole schema init (and with
+      // it every read, including the sales history) down with it. Repair
+      // first: keep the original line per uuid, NULL the rest (see
+      // patchOrderItemsUuidDuplicates above).
+      await patchOrderItemsUuidDuplicates(db);
       // The sync pull upserts on uuid, so the local table needs it UNIQUE -
       // without this, replaying the same rows raises a constraint error and the
       // offline replica silently stops accepting them.

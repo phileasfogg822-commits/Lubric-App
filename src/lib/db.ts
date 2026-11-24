@@ -29,7 +29,6 @@ const DEFAULT_API_BASE = import.meta.env.VITE_API_URL
 type DbMode = "server" | "local";
 
 let cachedMode: DbMode | null = null;
-let localConn: any = null;
 let modeListeners: ((m: DbMode) => void)[] = [];
 
 /** React-friendly: subscribe to mode changes (used by the sync status UI). */
@@ -83,21 +82,50 @@ export async function getLocalDb(): Promise<any> {
   return getLocal();
 }
 
+/** How long a local write waits for the database lock before failing (ms).
+ *
+ * rusqlite defaults to 0, so a sale transaction colliding with the sync
+ * loop's writes failed instantly with SQLITE_BUSY (517) — reported
+ * 2026-11-24. Five seconds covers a sale transaction and a sync pass; the
+ * sync loop runs every 2 minutes and a sale takes far less than that. Set on
+ * the connection before the schema DDL, so the schema work benefits too.
+ * Runs through the unified handle's execute, so it covers both the Tauri
+ * and the Capacitor drivers. */
+export const LOCAL_BUSY_TIMEOUT_MS = 5000;
+
+let localConnPromise: Promise<any> | null = null;
+
 async function getLocal(): Promise<any> {
-  if (!localConn) {
-    if (isCapacitor()) {
-      // Phone shell: the Capacitor SQLite driver (see capDb.ts). The Tauri
-      // plugin does not exist in a WebView, so this branch must come first.
-      const cap: any = await import("./capDb");
-      localConn = await cap.openCapDb();
-    } else {
-      const mod: any = await import("@tauri-apps/plugin-sql");
-      const load = mod.load ?? mod.default?.load;
-      localConn = await load("sqlite:lubric.db");
-    }
+  if (!localConnPromise) {
+    // Promise-cached, not assigned after the await: concurrent callers used
+    // to all see localConn === null and each open their own connection, so
+    // one process held several writers on the same file — the 517 race in
+    // its purest form. The cached promise hands every caller the one load.
+    // A failed load clears the cache before rethrowing, so the next call
+    // retries instead of awaiting a permanently rejected promise.
+    localConnPromise = (async () => {
+      try {
+        let conn: any;
+        if (isCapacitor()) {
+          // Phone shell: the Capacitor SQLite driver (see capDb.ts). The Tauri
+          // plugin does not exist in a WebView, so this branch must come first.
+          const cap: any = await import("./capDb");
+          conn = await cap.openCapDb();
+        } else {
+          const mod: any = await import("@tauri-apps/plugin-sql");
+          const load = mod.load ?? mod.default?.load;
+          conn = await load("sqlite:lubric.db");
+        }
+        await conn.execute(`PRAGMA busy_timeout = ${LOCAL_BUSY_TIMEOUT_MS}`);
+        await ensureLocalSchema(conn);
+        return conn;
+      } catch (e) {
+        localConnPromise = null;
+        throw e;
+      }
+    })();
   }
-  await ensureLocalSchema(localConn);
-  return localConn;
+  return localConnPromise;
 }
 
 export function apiBase(): string {

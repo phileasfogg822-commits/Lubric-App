@@ -49,6 +49,132 @@ export interface ResolvedPrice {
   source: "party" | "assigned_list" | "group_list" | "group_tier" | "tier" | "none";
 }
 
+import { packLitres } from "./units.ts";
+
+/**
+ * Per-litre unit price for a partial-container (leftover oil) line.
+ *
+ * A container line bills by the litre drawn, not by the bottle: 0.5L from a
+ * 4000/4L bottle is 500, not 4000 (the whole bottle) and not 2000 (half the
+ * bottle — 0.5L is the litres left, not half the bottle). addContainer used
+ * to charge the full bottle price per litre, which is exactly the error
+ * reported 2026-11-24. Pack <= 0 (no volume on the product) falls back to
+ * the full price: without a pack there is nothing to pro-rate against.
+ */
+export function perLitreUnitPrice(pack: number, fullPrice: number): number {
+  if (!(pack > 0)) return fullPrice;
+  return Math.round((fullPrice / pack) * 100) / 100; // paisa-safe
+}
+
+/**
+ * The product's OWN tier price for a customer type — the legacy columns only.
+ *
+ * This is deliberately NOT resolvePrice: resolvePrice's steps 1-2 (an agreed
+ * party price, an assigned or group price list) are the "general price" a
+ * leftover bottle must never be re-priced at. A leftover is priced from its
+ * own brand's pack, so only the product's own columns count here.
+ */
+export function ownTierPrice(
+  p: PriceSource["product"],
+  ct: CustomerType,
+  qty = 1
+): number | null {
+  return fromTiers(p, ct, qty);
+}
+
+/**
+ * What a partial container costs, per litre — from the EXACT bottle it came
+ * from, never from the customer in front of the shopkeeper.
+ *
+ * Reported 2026-11-24, refined the same day: "the price should be taken from
+ * the original brand of that bottle, not the general price, it should be
+ * considered from the full pack of that exact bottle in the stock or memory."
+ *
+ * Sources, in order — both are the bottle's OWN price, so a walking customer
+ * and a wholesale customer with an agreed party price get the SAME per-litre
+ * price for the same bottle, and a different brand's bottle prices differently:
+ *
+ *   1. The recorded sale (the memory): containers.source_order_id points at
+ *      the order that opened this bottle, and the source order_items line for
+ *      this product is what that bottle actually cost. When that line was
+ *      billed by capacity its unit_price is pro-rated (3500 for 3.5L of a
+ *      4L bottle), so the full-pack price is recovered by dividing out the
+ *      capacity fraction (3500 / (3.5/4) = 4000) — the pro-rated figure is
+ *      never taken as the pack price.
+ *   2. The stock record: the product's own tier columns for the customer
+ *      type (price_walking / price_returning / price_wholesale) — the
+ *      product's own prices, not negotiated ones.
+ *
+ * If neither source has a price, this THROWS instead of pricing the line at
+ * a generic rate: a leftover with no known price must fail visibly (the POS
+ * shows the reason and adds nothing) rather than silently giving oil away
+ * free or at a guessed price. Callers that only display a price should use
+ * containerUnitPriceOrNull.
+ *
+ * `product` is the product row matched by container.product_id (the caller
+ * does the match); the container's recorded line must already be the one for
+ * that product — POSSearch's query joins it by (source_order_id, product_id).
+ */
+export interface ContainerPriceInput {
+  product_id: number;
+  /** Provenance only — the recorded line below is already matched to it. */
+  source_order_id?: number | null;
+  /** The source order's recorded line for this product, when it exists. */
+  source_unit_price?: number | null;
+  source_capacity?: number | null;
+  source_billed_by_capacity?: boolean | number | null;
+  /** Provenance only — the litres drawn are the cart's qty, not a price. */
+  remaining_volume?: number | null;
+}
+
+export type ContainerProductPrice = PriceSource["product"] & {
+  packing?: string | null;
+  name?: string | null;
+};
+
+export function containerUnitPrice(
+  c: ContainerPriceInput,
+  product: ContainerProductPrice | null | undefined,
+  ct: CustomerType
+): number {
+  const pack = packLitres(product);
+  if (!(pack > 0)) {
+    throw new Error(
+      `Cannot price leftover oil: ${product?.name ?? "this product"} has no pack size in litres`
+    );
+  }
+  // 1. The memory — what this exact bottle actually cost in its source sale.
+  const recorded = Number(c?.source_unit_price ?? NaN);
+  if (Number.isFinite(recorded) && recorded > 0) {
+    const cap = Number(c?.source_capacity ?? 0);
+    const byCapacity =
+      c?.source_billed_by_capacity === true || c?.source_billed_by_capacity === 1;
+    const fullPack =
+      byCapacity && cap > 0 && cap < pack ? (recorded * pack) / cap : recorded;
+    if (fullPack > 0) return perLitreUnitPrice(pack, fullPack);
+  }
+  // 2. The stock record — the product's own tier price for this customer type.
+  // Party prices and price lists are deliberately NOT consulted here.
+  const tier = ownTierPrice(product, ct, 1);
+  if (tier !== null && tier > 0) return perLitreUnitPrice(pack, tier);
+  throw new Error(
+    `Cannot price leftover oil: no recorded sale price and no own price for ${product?.name ?? "this product"}`
+  );
+}
+
+/** containerUnitPrice, but null instead of a throw — for search display only. */
+export function containerUnitPriceOrNull(
+  c: ContainerPriceInput,
+  product: ContainerProductPrice | null | undefined,
+  ct: CustomerType
+): number | null {
+  try {
+    return containerUnitPrice(c, product, ct);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Best price for a product from a list, honouring quantity breaks.
  *

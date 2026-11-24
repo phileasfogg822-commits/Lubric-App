@@ -111,18 +111,34 @@ export function addService(cart: CartItem[], s: { id: number; name: string; pric
   return [...cart, { id: `s-${s.id}-${Date.now()}`, kind: "service", ref_id: s.id, name: s.name, qty: 1, unit_price: s.price, line_total: s.price }];
 }
 
+/**
+ * Add a partial container (leftover oil) to the cart.
+ *
+ * A container line bills by the LITRE drawn, never by the bottle: `qty` is
+ * litres, capped at the first litre (or the whole remainder when it is under
+ * a litre), and `unitPrice` is the PER-LITRE price of this exact bottle.
+ *
+ * The per-litre price is resolved by the caller (POS.tsx) through
+ * containerUnitPrice in src/lib/pricing.ts — the recorded sale for this
+ * bottle first, else the product's own tier columns, never a negotiated
+ * price — and passed in here, because resolving it here would throw inside
+ * this setState updater when the bottle cannot be priced. The existing-line
+ * branch re-uses the line's own unit_price, so a second tap only draws one
+ * more litre (still capped at what is left) at the same per-litre price.
+ */
 export function addContainer(
   cart: CartItem[],
   c: any,
-  ct: CustomerType,
-  products: Product[],
-  ctx: PriceSource = {}
+  unitPrice: number
 ): CartItem[] {
   const ex = cart.find((x) => x.kind === "partial_container" && x.container_id === c.id);
   if (ex) return cart.map((x) => x === ex && x.qty < c.remaining_volume ? { ...x, qty: x.qty + 1, line_total: x.unit_price * (x.qty + 1) } : x);
-  const p = products.find((pr: Product) => pr.id === c.product_id);
-  const u = p ? tierPrice(p, ct, 1, ctx) : 0;
-  return [...cart, { id: `c-${c.id}-${Date.now()}`, kind: "partial_container", ref_id: c.id, name: `${c.product_name} (${c.remaining_volume.toFixed(1)}L left)`, qty: 1, unit_price: u, line_total: u, container_id: c.id, max_qty: c.remaining_volume }];
+  // Start at one litre — or the whole remainder when it is under a litre.
+  // The old code always started at qty 1, which on a 0.5L container drew
+  // half a litre more than the bottle holds (remaining went to -0.5).
+  const qty = Math.min(1, Math.max(0, Number(c.remaining_volume) || 0));
+  if (!(qty > 0)) return cart;
+  return [...cart, { id: `c-${c.id}-${Date.now()}`, kind: "partial_container", ref_id: c.id, name: `${c.product_name} (${c.remaining_volume.toFixed(1)}L left)`, qty, unit_price: unitPrice, line_total: Math.round(unitPrice * qty * 100) / 100, container_id: c.id, max_qty: c.remaining_volume }];
 }
 
 export function updateQty(
@@ -245,7 +261,11 @@ export async function completeSale(
     statements.push({
       sql: `INSERT INTO order_items (order_id, kind, ref_id, product_name, qty, unit_price, line_total, container_id, capacity, leftover_litres, leftover_to, leftover_released, billed_by_capacity) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       params: [oid, item.kind, item.ref_id, item.name, item.qty, item.unit_price, item.line_total, item.container_id ?? null,
-               item.kind === "product" ? (item.capacity ?? 0) : 0, lo, toContainers ? "container" : "customer", false, byCapacity]
+               // A container line's capacity IS the litres drawn (0.5L of a
+               // 4L bottle), so the history shows it — the old code wrote 0
+               // for every non-product line, and the sale vanished from the
+               // capacity column even though the oil left the shelf.
+               item.kind === "partial_container" ? item.qty : (item.kind === "product" ? (item.capacity ?? 0) : 0), lo, toContainers ? "container" : "customer", false, byCapacity]
     });
     // Shelve the unused oil as a partial container. The bill is untouched: the
     // customer has already been charged, pro-rata or for the whole bottle.

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { dbSelect } from "../../lib/db";
 import { currency } from "../../lib/format";
 import type { CustomerType } from "../../lib/types";
-import { resolvePrice, type PriceSource } from "../../lib/pricing";
+import { resolvePrice, containerUnitPriceOrNull, type PriceSource } from "../../lib/pricing";
 import Suggestions from "../../components/Suggestions";
 
 export interface SearchResult {
@@ -35,13 +35,14 @@ interface Props {
  * and the cart charges another, so both now ask src/lib/pricing.ts, which is
  * also where the customer's own price list is honoured - meaning the price in
  * the dropdown is the price that will actually be billed.
+ *
+ * Partial containers do NOT use this: their price is the per-litre price of
+ * the exact bottle (containerDisplayPrice below), never the negotiated price
+ * resolvePrice would give for the customer in front of the shopkeeper.
  */
 function priceFor(item: any, tier: CustomerType, qty: number, ctx: PriceSource): number {
   return resolvePrice(item.id, tier, qty, {
     ...ctx,
-    // A partial container inherits the pricing of the product it came from, so
-    // a customer on a negotiated price does not start paying list price for the
-    // last 2 litres someone else opened.
     product: {
       price_walking: item.price_walking,
       price_returning: item.price_returning,
@@ -49,6 +50,33 @@ function priceFor(item: any, tier: CustomerType, qty: number, ctx: PriceSource):
       wholesale_min_qty: item.wholesale_min_qty,
     },
   }).price || 0;
+}
+
+/**
+ * What a partial container shows in the search dropdown.
+ *
+ * It must be the number the cart will actually bill for the first draw — the
+ * per-litre price of this exact bottle (containerUnitPriceOrNull: the recorded
+ * sale first, else the product's own tier columns, never a negotiated price)
+ * times the litres the cart starts with (1L, or the whole remainder when it
+ * is under a litre). Showing the full-bottle price here is how search quoted
+ * 4000 and the cart charged 500; showing the per-litre price alone is how it
+ * quoted 1000 for a 0.5L remainder.
+ *
+ * An unpriceable bottle shows 0 here — adding it then fails visibly in the
+ * POS with the reason, rather than the search silently hiding stock.
+ */
+function containerDisplayPrice(c: any, tier: CustomerType): number {
+  const perLitre = containerUnitPriceOrNull(c, {
+    packing: c.packing,
+    price_walking: c.price_walking,
+    price_returning: c.price_returning,
+    price_wholesale: c.price_wholesale,
+    wholesale_min_qty: c.wholesale_min_qty,
+  }, tier);
+  if (perLitre === null) return 0;
+  const qty = Math.min(1, Math.max(0, Number(c.remaining_volume) || 0));
+  return Math.round(perLitre * qty * 100) / 100;
 }
 
 export default function POSSearch({ onSelect, customerType, priceCtx = {} }: Props) {
@@ -66,14 +94,14 @@ export default function POSSearch({ onSelect, customerType, priceCtx = {} }: Pro
         const [products, services, containers, drums] = await Promise.all([
           dbSelect<any>("SELECT id, name, price_walking, price_returning, price_wholesale, stock_qty, wholesale_min_qty FROM products WHERE active = 1 AND (LOWER(name) LIKE $1 OR sku LIKE $2 OR barcode LIKE $2) ORDER BY name LIMIT 10", [q, `%${query}%`]),
           dbSelect<any>("SELECT id, name, price FROM services WHERE active = 1 AND LOWER(name) LIKE $1 ORDER BY name LIMIT 5", [q]),
-          dbSelect<any>("SELECT c.id, c.product_id, c.barcode, c.remaining_volume, c.status, p.name as product_name, p.price_walking, p.price_returning, p.price_wholesale, p.wholesale_min_qty FROM containers c JOIN products p ON c.product_id = p.id WHERE c.status IN ('opened','full') AND c.remaining_volume > 0 AND LOWER(p.name) LIKE $1 ORDER BY c.opened_at DESC LIMIT 5", [q]),
+          dbSelect<any>("SELECT c.id, c.product_id, c.barcode, c.remaining_volume, c.status, c.source_order_id, p.name as product_name, p.packing, p.price_walking, p.price_returning, p.price_wholesale, p.wholesale_min_qty, (SELECT oi.unit_price FROM order_items oi WHERE oi.order_id = c.source_order_id AND oi.ref_id = c.product_id AND oi.kind = 'product' ORDER BY oi.id LIMIT 1) AS source_unit_price, (SELECT oi.capacity FROM order_items oi WHERE oi.order_id = c.source_order_id AND oi.ref_id = c.product_id AND oi.kind = 'product' ORDER BY oi.id LIMIT 1) AS source_capacity, (SELECT oi.billed_by_capacity FROM order_items oi WHERE oi.order_id = c.source_order_id AND oi.ref_id = c.product_id AND oi.kind = 'product' ORDER BY oi.id LIMIT 1) AS source_billed_by_capacity FROM containers c JOIN products p ON c.product_id = p.id WHERE c.status IN ('opened','full') AND c.remaining_volume > 0 AND LOWER(p.name) LIKE $1 ORDER BY c.opened_at DESC LIMIT 5", [q]),
           dbSelect<any>("SELECT id, current_litres, capacity FROM used_oil_drum ORDER BY id LIMIT 1"),
         ]);
         const oilMatch = /oil|drum|used/i.test(query);
         const items: SearchResult[] = [
           ...products.map((p: any) => ({ type: "product" as const, id: p.id, name: p.name, price: priceFor(p, customerType, 1, priceCtx), price_walking: p.price_walking, price_returning: p.price_returning, price_wholesale: p.price_wholesale, stock_qty: p.stock_qty, wholesale_min_qty: p.wholesale_min_qty, raw: p })),
           ...services.map((s: any) => ({ type: "service" as const, id: s.id, name: s.name, price: s.price, price_walking: s.price, price_returning: s.price, price_wholesale: s.price, raw: s })),
-          ...containers.map((c: any) => ({ type: "container" as const, id: c.id, name: c.product_name, price: priceFor(c, customerType, 1, priceCtx), price_walking: c.price_walking, price_returning: c.price_returning, price_wholesale: c.price_wholesale, remaining_volume: c.remaining_volume, status: c.status, wholesale_min_qty: c.wholesale_min_qty, raw: c })),
+          ...containers.map((c: any) => ({ type: "container" as const, id: c.id, name: c.product_name, price: containerDisplayPrice(c, customerType), price_walking: c.price_walking, price_returning: c.price_returning, price_wholesale: c.price_wholesale, remaining_volume: c.remaining_volume, status: c.status, wholesale_min_qty: c.wholesale_min_qty, raw: c })),
         ...(drums.length && oilMatch ? [{ type: "used_oil" as const, id: drums[0].id, name: "Used Oil Drum (drop-off)", price: 0, price_walking: 0, price_returning: 0, price_wholesale: 0, remaining_volume: drums[0].current_litres, raw: drums[0] }] : []),
         ];
         setResults(items);

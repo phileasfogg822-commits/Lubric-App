@@ -10,6 +10,7 @@ import POSPrint from "./POSPrint";
 import { addProduct, addService, addContainer, updateQty, updatePrice, completeSale, releaseLeftoverToCustomer, leftoverLitres, packLitres, repriceAll, updateCapacity, toggleBillByCapacity, toggleLeftoverToContainers, tierPrice, type SaleVehicle } from "./POSCart";
 import Suggestions from "../../components/Suggestions";
 import { TransactionDone, TransactionSpinner, useTransactionDone } from "../../components/TransactionDone";
+import { containerUnitPrice } from "../../lib/pricing";
 import {
   buildPriceMemory,
   formatMemoryLine,
@@ -37,6 +38,13 @@ export default function POS() {
   // while the sale runs, then "Order #123 completed" for exactly 2 seconds.
   // `success` stays for non-transaction notices (e.g. a customer tier change).
   const tx = useTransactionDone();
+  // Synchronous double-submit guard. tx.busy is state, so it only disables
+  // the button after a re-render — a fast second tap slips through before
+  // that, and a second concurrent completeSale re-runs the same statements
+  // with the same frozen uuids and dies on order_items.uuid UNIQUE (2067).
+  // A ref flips synchronously, so the second tap is refused before anything
+  // is submitted; it clears in the finally below, even on failure.
+  const submittingRef = useRef(false);
   const [lastSale, setLastSale] = useState<{ orderId: number; items: CartItem[]; total: number; customerName: string; customerPhone: string; mileage: number; notes: string; vehicle: SaleVehicle | null } | null>(null);
   const [customerHistory, setCustomerHistory] = useState<any>(null);
   // Customer name type-ahead
@@ -471,7 +479,21 @@ export default function POS() {
     } else if (item.type === "service") {
       setCart((c) => addService(c, item.raw));
     } else if (item.type === "container") {
-      setCart((c) => addContainer(c, item.raw, customerType, products ?? [], priceCtx));
+      // The leftover price is resolved HERE, in the event handler, not inside
+      // the setCart updater below: containerUnitPrice throws when the bottle
+      // cannot be priced (no recorded sale and no own tier price), and a throw
+      // inside an updater would break the render. Here the operator gets the
+      // reason in the error banner and no line is added — never a silently
+      // free (or wrongly priced) line in the cart.
+      const p = products?.find((pr) => pr.id === item.raw.product_id);
+      let unit: number;
+      try {
+        unit = containerUnitPrice(item.raw, p ?? null, customerType);
+      } catch (e: any) {
+        setError(e?.message ?? String(e));
+        return;
+      }
+      setCart((c) => addContainer(c, item.raw, unit));
     } else if (item.type === "used_oil") {
       const q = prompt("Litres of used oil received:", "5");
       if (!q) return;
@@ -507,6 +529,8 @@ export default function POS() {
     setError("");
     setSuccess("");
     if (!cart.length) { setError("Cart is empty"); return; }
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     tx.setBusy(true);
     try {
       const vh = vehicle.registration.trim() ? vehicle : null;
@@ -516,7 +540,7 @@ export default function POS() {
       handleClear();
       qc.invalidateQueries();
     } catch (e: any) { setError(e.message || String(e)); }
-    finally { tx.setBusy(false); }
+    finally { tx.setBusy(false); submittingRef.current = false; }
   }
 
   // Printable data: live cart takes priority, otherwise the last completed sale
