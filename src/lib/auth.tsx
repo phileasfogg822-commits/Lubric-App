@@ -8,6 +8,9 @@ import { setActiveShopId, activeShopId as readActiveShopId, apiBase, dbGet, isTa
 // sees the branding subset and gets 401 on flags), so they are dropped at
 // every identity change.
 import { invalidateConfigCache } from "./configFlags";
+// Passwords are never stored: the persisted user row carries no hash, and a
+// successful sign-in remembers only the email, for the login picker.
+import { rememberEmail, stripPasswordHash } from "./loginMemory";
 
 export interface User {
   id: number;
@@ -59,7 +62,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return null;
-      return JSON.parse(raw) as User;
+      // A session stored before this fix may still carry password_hash;
+      // strip it on load, and the persist effect below writes back clean.
+      return stripPasswordHash(JSON.parse(raw) as User);
     } catch {
       return null;
     }
@@ -137,7 +142,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // The branding-only, flag-less caches from the pre-login screen must
         // not survive into the session: refetch as this user.
         invalidateConfigCache();
-        setUser(data.user);
+        // Store the user WITHOUT password_hash, and remember only the email
+        // for the login picker — the password itself is never persisted.
+        setUser(stripPasswordHash<User>(data.user));
+        rememberEmail(email);
         // The outlet list arrives with the login so the selector can render
         // without a second round trip. Default to the home outlet; the effect
         // above reconciles it if a previous session left another one stored.
@@ -176,7 +184,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Same cache discipline as the server path: the pre-login branding
     // cache must not survive into the session.
     invalidateConfigCache();
-    setUser(row);
+    // The database row carries password_hash for the bcrypt check above;
+    // the session copy must not. Remember only the email for the picker.
+    setUser(stripPasswordHash(row));
+    rememberEmail(email);
     // One shop, one outlet: the local database holds exactly the shop this
     // install was set up for.
     const shop = await dbGet<{ id: number; name: string }>(
