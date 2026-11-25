@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS account_transactions (id INTEGER PRIMARY KEY AUTOINCR
 CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, customer_id INTEGER, user_id INTEGER NOT NULL, total REAL DEFAULT 0, paid_amount REAL DEFAULT 0, payment_account_id INTEGER, payment_method TEXT DEFAULT 'cash', status TEXT DEFAULT 'completed', vehicle_id INTEGER, mileage INTEGER DEFAULT 0, notes TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS order_items (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, kind TEXT NOT NULL, ref_id INTEGER NOT NULL, uuid TEXT, shop_id INTEGER DEFAULT 1, product_name TEXT DEFAULT '', qty REAL DEFAULT 1, unit_price REAL DEFAULT 0, line_total REAL DEFAULT 0, container_id INTEGER, capacity REAL DEFAULT 0, leftover_litres REAL DEFAULT 0, leftover_to TEXT DEFAULT 'customer', leftover_released INTEGER DEFAULT 0, billed_by_capacity INTEGER DEFAULT 0, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS used_oil_drum (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, current_litres REAL DEFAULT 0, capacity REAL DEFAULT 200);
-CREATE TABLE IF NOT EXISTS used_oil_log (id INTEGER PRIMARY KEY AUTOINCREMENT, drum_id INTEGER NOT NULL, litres REAL NOT NULL, type TEXT DEFAULT 'added', source_order_id INTEGER, created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS used_oil_log (id INTEGER PRIMARY KEY AUTOINCREMENT, drum_id INTEGER NOT NULL, litres REAL NOT NULL, type TEXT DEFAULT 'added', source_order_id INTEGER, notes TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, category TEXT NOT NULL, subcategory TEXT DEFAULT '', amount REAL DEFAULT 0, account_id INTEGER, date TEXT, note TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS purchase_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, vendor_id INTEGER, total REAL DEFAULT 0, paid REAL DEFAULT 0, status TEXT DEFAULT 'completed', notes TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS purchase_order_items (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, product_name TEXT DEFAULT '', qty REAL DEFAULT 0, unit_cost REAL DEFAULT 0, line_total REAL DEFAULT 0);
@@ -494,6 +494,13 @@ const SYNC_COLUMN_PATCHES: { table: string; column: string; decl: string }[] = [
   { table: "vendors", column: "uuid", decl: "TEXT" },
   { table: "vendors", column: "updated_at", decl: "TEXT" },
   { table: "vendors", column: "deleted_at", decl: "TEXT" },
+  // Migration 004 added used_oil_log.notes on the server (the Used Oil page
+  // writes type='collected'/'disposed' with a notes value) but the local
+  // CREATE TABLE above was never widened to match — so every Collect/Dispose
+  // click on the Windows app died with "table used_oil_log has no column
+  // named notes" (reported 2026-11-25). The patch gives existing local
+  // databases the column; fresh installs get it from the CREATE TABLE.
+  { table: "used_oil_log", column: "notes", decl: "TEXT DEFAULT ''" },
 ];
 
 async function patchSyncColumns(db: { select: (s: string) => Promise<unknown>; execute: (s: string) => Promise<unknown> }): Promise<void> {
