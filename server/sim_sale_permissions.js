@@ -87,6 +87,17 @@ const SALE_STATEMENTS = [
   'UPDATE accounts SET balance = balance + $1 WHERE id = $2',
   "INSERT INTO account_transactions (account_id, amount, type, reference) VALUES ($1, $2, 'in', $3)",
   'UPDATE customers SET last_visit_at = NOW() WHERE id = $1',
+  // Khata for a customer sale (POSCart.tsx, batch 13): bill for the full
+  // total plus a payment for what was collected, both linked to the order,
+  // and the denormalised balance step that moves with them.
+  `INSERT INTO party_ledger
+                  (uuid, shop_id, party_type, party_id, kind, direction, amount, note, occurred_at, origin, order_id)
+                VALUES ($1, 1, $2, $3, 'bill', 'debit', $4, $5, $6, 'shop', $7)`,
+  `INSERT INTO party_ledger
+              (uuid, shop_id, party_type, party_id, kind, direction, amount,
+               vendor_payable_id, note, occurred_at, origin, order_id)
+            VALUES ($1, 1, $2, $3, 'payment', 'credit', $4, $5, $6, $7, 'shop', $8)`,
+  'UPDATE customers SET credit_balance = COALESCE(credit_balance, 0) + $1 WHERE id = $2',
   `INSERT INTO reminders
               (shop_id, kind, title, details, due_at, due_km, last_mileage,
                customer_id, vehicle_id, order_id, created_by_user_id)
@@ -111,6 +122,8 @@ check('the statement list still matches POSCart.tsx (drift guard)', () => {
   assert(POSCART.includes('INSERT INTO used_oil_log'), 'used_oil_log INSERT moved');
   assert(POSCART.includes('UPDATE used_oil_drum SET current_litres'), 'used_oil_drum UPDATE moved');
   assert(POSCART.includes('stockOut(item.ref_id'), 'stockOut call moved');
+  assert(POSCART.includes('billStatements({'), 'a customer sale must post its Khata bill');
+  assert(POSCART.includes('paymentStatements({'), 'a customer sale must post its Khata payment');
 });
 
 check('worker1 can complete the widest sale: every statement allowed', () => {

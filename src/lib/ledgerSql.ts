@@ -224,6 +224,14 @@ export interface PaymentInput {
   occurredAt: string;
   /** Vendor invoices this payment settles, oldest first (allocatePayables). */
   settle: PayableSettlement[];
+  /**
+   * The order this payment collects for, when the payment is part of a till
+   * sale. The ledger's (order_id, kind) unique index allows one payment row
+   * per order, so a sale's collection links back to its bill instead of
+   * floating free — and the Khata statement can show bill and payment
+   * together. A manual Khata payment has no order, so this stays null.
+   */
+  orderId?: number | null;
 }
 
 /**
@@ -243,9 +251,9 @@ export function paymentStatements(i: PaymentInput): Statement[] {
     {
       sql: `INSERT INTO party_ledger
               (uuid, shop_id, party_type, party_id, kind, direction, amount,
-               vendor_payable_id, note, occurred_at, origin)
-            VALUES ($1, 1, $2, $3, 'payment', 'credit', $4, $5, $6, $7, 'shop')`,
-      params: [i.uuid, i.partyType, i.partyId, amount, i.settle[0]?.id ?? null, note, i.occurredAt],
+               vendor_payable_id, note, occurred_at, origin, order_id)
+            VALUES ($1, 1, $2, $3, 'payment', 'credit', $4, $5, $6, $7, 'shop', $8)`,
+      params: [i.uuid, i.partyType, i.partyId, amount, i.settle[0]?.id ?? null, note, i.occurredAt, i.orderId ?? null],
     },
     balanceStep(i.partyType, i.partyId, -amount),
   ];
@@ -293,6 +301,14 @@ export interface BillInput {
   occurredAt: string;
   /** Vendor only: when the invoice falls due. */
   dueDate?: string | null;
+  /**
+   * The order this bill is for, when the bill is a till sale. Same reason
+   * as PaymentInput.orderId: the (order_id, kind) unique index allows one
+   * bill row per order, and the backfill in 014 already writes bills with
+   * their order id — a sale posted here must match that shape, or the same
+   * order would appear as two different bills in the Khata.
+   */
+  orderId?: number | null;
 }
 
 /**
@@ -332,9 +348,9 @@ export function billStatements(i: BillInput): Statement[] {
         }
       : {
           sql: `INSERT INTO party_ledger
-                  (uuid, shop_id, party_type, party_id, kind, direction, amount, note, occurred_at, origin)
-                VALUES ($1, 1, $2, $3, 'bill', 'debit', $4, $5, $6, 'shop')`,
-          params: [i.uuid, i.partyType, i.partyId, amount, note, i.occurredAt],
+                  (uuid, shop_id, party_type, party_id, kind, direction, amount, note, occurred_at, origin, order_id)
+                VALUES ($1, 1, $2, $3, 'bill', 'debit', $4, $5, $6, 'shop', $7)`,
+          params: [i.uuid, i.partyType, i.partyId, amount, note, i.occurredAt, i.orderId ?? null],
         }
   );
 

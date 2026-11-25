@@ -3,6 +3,15 @@ import { dbGet, dbExecute, dbSelect, dbTransaction } from "../../lib/db";
 
 import { stockOut } from "../../lib/stock";
 import { newUuid } from "../../lib/uuid";
+import { billStatements, paymentStatements, round2 } from "../../lib/ledgerSql";
+import {
+  resolvePaidNow,
+  resolvePaymentMethod,
+  todayLocal,
+  validatePayment,
+  type PayChoice,
+  type PaymentMethod,
+} from "../../lib/payment";
 
 // The pure cart helpers live in src/lib/cart.ts (moved there so they have a
 // test — node cannot import this .tsx file, which is how the addContainer
@@ -44,6 +53,15 @@ export interface SaleVehicle {
   condition: string;
 }
 
+export interface SalePayment {
+  /** Which till method received the money (ignored for a pay-later sale). */
+  method: PaymentMethod;
+  /** Full pays the total, partial pays amountPaid, later pays nothing. */
+  choice: PayChoice;
+  /** Amount paid now, for a partial sale; ignored for full and later. */
+  amountPaid: number;
+}
+
 export async function completeSale(
   cart: CartItem[],
   userId: number,
@@ -52,9 +70,23 @@ export async function completeSale(
   total: number,
   mileage: number,
   notes: string,
-  vehicle?: SaleVehicle | null
+  vehicle?: SaleVehicle | null,
+  payment?: SalePayment
 ): Promise<number> {
-  // Stock guard — FIRST, before any write (before the order id is reserved
+  // Payment rules — FIRST, before any read or write (before the stock guard
+  // and before the order id is reserved): a walk-in has nobody to owe, so
+  // partial and pay-later need a customer, and a partial amount must sit
+  // strictly between 0 and the total. The UI validates the same way, but
+  // the sale itself must never depend on the screen to enforce this — a
+  // rejected sale throws here and writes nothing.
+  const payChoice: PayChoice = payment?.choice ?? "full";
+  const payMethod: PaymentMethod = payment?.method ?? "cash";
+  const paidNow = resolvePaidNow(total, payChoice, payment?.amountPaid ?? 0);
+  const orderMethod = resolvePaymentMethod(payChoice, payMethod);
+  const payError = validatePayment(total, payChoice, payment?.amountPaid ?? 0, customerId != null);
+  if (payError) throw new Error(payError);
+
+  // Stock guard — before any write (before the order id is reserved
   // and before the vehicle is touched): a sale must never take more than
   // the shop has. The old code checked nothing, so a finished product
   // could be sold until its stock read -2 and a container to -0.5L
@@ -119,10 +151,15 @@ export async function completeSale(
   }
 
   // Everything below — the order plus all stock/account movements — is one transaction.
+  // The order row records what was actually collected, not the total: paid_amount
+  // is the money in hand now (total for full, the entered amount for partial,
+  // 0 for later) and payment_method names how it arrived ('pay_later' when
+  // nothing arrived). The sale still counts as completed — the goods went out —
+  // and what is owed is total - paid_amount, which Reports already derives.
   const statements: { sql: string; params: unknown[] }[] = [
     {
-      sql: `INSERT INTO orders (id, shop_id, customer_id, user_id, total, paid_amount, payment_account_id, payment_method, status, vehicle_id, mileage, notes, created_at) VALUES ($1, 1, $2, $3, $4, $4, $5, 'cash', 'completed', $6, $7, $8, NOW())`,
-      params: [oid, customerId, userId, total, paymentAccountId, vehicleId, mileage, notes]
+      sql: `INSERT INTO orders (id, shop_id, customer_id, user_id, total, paid_amount, payment_account_id, payment_method, status, vehicle_id, mileage, notes, created_at) VALUES ($1, 1, $2, $3, $4, $5, $6, $7, 'completed', $8, $9, $10, NOW())`,
+      params: [oid, customerId, userId, total, paidNow, paymentAccountId, orderMethod, vehicleId, mileage, notes]
     }
   ];
 
@@ -173,13 +210,56 @@ export async function completeSale(
     }
   }
 
-  if (total > 0) {
-    statements.push({ sql: "UPDATE accounts SET balance = balance + $1 WHERE id = $2", params: [total, paymentAccountId] });
-    statements.push({ sql: "INSERT INTO account_transactions (account_id, amount, type, reference) VALUES ($1, $2, 'in', $3)", params: [paymentAccountId, total, `Order #${oid}`] });
+  // Only the money actually collected moves the till: a partial sale credits
+  // the paid part, a pay-later sale credits nothing. The reference stays the
+  // order number — account_transactions has no method column, and the method
+  // already lives on the order row.
+  if (paidNow > 0) {
+    statements.push({ sql: "UPDATE accounts SET balance = balance + $1 WHERE id = $2", params: [paidNow, paymentAccountId] });
+    statements.push({ sql: "INSERT INTO account_transactions (account_id, amount, type, reference) VALUES ($1, $2, 'in', $3)", params: [paymentAccountId, paidNow, `Order #${oid}`] });
   }
 
   if (customerId) {
     statements.push({ sql: "UPDATE customers SET last_visit_at = NOW() WHERE id = $1", params: [customerId] });
+  }
+
+  // Khata: a customer sale is a bill for the FULL total plus a payment for
+  // whatever was collected at the till — exactly the shape migration 014's
+  // backfill writes for old orders, so a new sale and an old one read the
+  // same in the customer's statement. The unpaid remainder is the udhaar:
+  // bill minus payment, which is also what the denormalised credit_balance
+  // moves by. A walk-in has no Khata, so no rows. A full payment still
+  // posts both rows (they net to zero) so the statement shows the bill and
+  // the collection together; a pay-later sale posts only the bill.
+  if (customerId) {
+    const occurredAt = todayLocal();
+    // The notes are explicit, so the party name is unused by the helpers.
+    statements.push(...billStatements({
+      uuid: newUuid(),
+      partyType: "customer",
+      partyId: customerId,
+      partyName: "",
+      amount: round2(total),
+      note: `Bill #${oid}`,
+      occurredAt,
+      orderId: oid,
+    }));
+    if (paidNow > 0) {
+      statements.push(...paymentStatements({
+        uuid: newUuid(),
+        partyType: "customer",
+        partyId: customerId,
+        partyName: "",
+        amount: paidNow,
+        // The till already credited the account above; the ledger payment
+        // must not move it a second time.
+        accountId: null,
+        note: `Collected at till - bill #${oid}`,
+        occurredAt,
+        settle: [],
+        orderId: oid,
+      }));
+    }
   }
 
   // Auto service reminder: when the bill includes a service and we know the

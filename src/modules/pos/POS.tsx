@@ -12,6 +12,14 @@ import Suggestions from "../../components/Suggestions";
 import { TransactionDone, TransactionSpinner, useTransactionDone } from "../../components/TransactionDone";
 import { containerUnitPrice } from "../../lib/pricing";
 import {
+  PAYMENT_METHOD_LABELS,
+  resolvePaidNow,
+  resolvePaymentMethod,
+  validatePayment,
+  type PayChoice,
+  type PaymentMethod,
+} from "../../lib/payment";
+import {
   buildPriceMemory,
   formatMemoryLine,
   PRICE_MEMORY_SQL,
@@ -29,6 +37,15 @@ export default function POS() {
   // The selected customer's price list and any individually agreed prices.
   const priceCtx = usePriceContext(customerId);
   const [paymentAccountId, setPaymentAccountId] = useState(1);
+  // How this sale is paid: the method that received the money, and whether
+  // it is the full total, part of it, or nothing yet. Small on purpose —
+  // the same scale as the W/R/Wh tier buttons — so the till header stays a
+  // till header and the payment choice does not shout. Partial and Later
+  // need a customer (a walk-in has nobody to owe); completeSale enforces
+  // that too, so the screen can never submit what the sale would refuse.
+  const [payMethod, setPayMethod] = useState<PaymentMethod>("cash");
+  const [payChoice, setPayChoice] = useState<PayChoice>("full");
+  const [partialAmount, setPartialAmount] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [notes, setNotes] = useState("");
   const [mileage, setMileage] = useState(0);
@@ -45,7 +62,7 @@ export default function POS() {
   // A ref flips synchronously, so the second tap is refused before anything
   // is submitted; it clears in the finally below, even on failure.
   const submittingRef = useRef(false);
-  const [lastSale, setLastSale] = useState<{ orderId: number; items: CartItem[]; total: number; customerName: string; customerPhone: string; mileage: number; notes: string; vehicle: SaleVehicle | null } | null>(null);
+  const [lastSale, setLastSale] = useState<{ orderId: number; items: CartItem[]; total: number; paidAmount: number; paymentMethod: PaymentMethod; customerName: string; customerPhone: string; mileage: number; notes: string; vehicle: SaleVehicle | null } | null>(null);
   const [customerHistory, setCustomerHistory] = useState<any>(null);
   // Customer name type-ahead
   const nameAnchorRef = useRef<HTMLInputElement>(null);
@@ -538,12 +555,21 @@ export default function POS() {
     setVehicle({ registration: "", make: "", model: "", modelYear: "", color: "", condition: "" });
     setVehicleSuggestions([]);
     setShowVehicleSuggest(false);
+    // A fresh sale starts as a full payment; a partial or later choice must
+    // be picked again deliberately, never carried over by accident.
+    setPayChoice("full");
+    setPartialAmount("");
   }
 
   async function handleComplete() {
     setError("");
     setSuccess("");
     if (!cart.length) { setError("Cart is empty"); return; }
+    // Same rules as completeSale, checked here so the operator gets the
+    // reason in the banner instead of a failed transaction.
+    const amountPaid = payChoice === "partial" ? parseFloat(partialAmount) : 0;
+    const payErr = validatePayment(total, payChoice, amountPaid, customerId != null);
+    if (payErr) { setError(payErr); return; }
     if (submittingRef.current) return;
     submittingRef.current = true;
     tx.setBusy(true);
@@ -552,8 +578,9 @@ export default function POS() {
     const soldCustomer = customerHistory?.customer ?? null;
     try {
       const vh = vehicle.registration.trim() ? vehicle : null;
-      const oid = await completeSale(cart, user?.id ?? 1, customerId, paymentAccountId, total, mileage, notes, vh);
-      setLastSale({ orderId: oid, items: [...cart], total, customerName: customerName.trim() || "Walk-in", customerPhone: customerPhone, mileage, notes, vehicle: vh });
+      const oid = await completeSale(cart, user?.id ?? 1, customerId, paymentAccountId, total, mileage, notes, vh, { method: payMethod, choice: payChoice, amountPaid });
+      const paidNow = resolvePaidNow(total, payChoice, amountPaid);
+      setLastSale({ orderId: oid, items: [...cart], total, paidAmount: paidNow, paymentMethod: resolvePaymentMethod(payChoice, payMethod), customerName: customerName.trim() || "Walk-in", customerPhone: customerPhone, mileage, notes, vehicle: vh });
       tx.showDone(`Order #${oid} completed`);
       handleClear();
       qc.invalidateQueries();
@@ -574,6 +601,14 @@ export default function POS() {
   const printVehicle = cart.length > 0 ? (vehicle.registration.trim() ? vehicle : null) : (lastSale?.vehicle ?? null);
   const printMileage = cart.length > 0 ? mileage : (lastSale?.mileage ?? 0);
   const printPhone = cart.length > 0 ? customerPhone : (lastSale?.customerPhone ?? "");
+  // What the receipt shows as paid: the live choice for a draft, the
+  // recorded payment for a completed sale.
+  const printPaidAmount = cart.length > 0
+    ? resolvePaidNow(total, payChoice, payChoice === "partial" ? parseFloat(partialAmount) || 0 : 0)
+    : (lastSale?.paidAmount ?? 0);
+  const printPaymentMethod = cart.length > 0
+    ? resolvePaymentMethod(payChoice, payMethod)
+    : (lastSale?.paymentMethod ?? "cash");
   const canPrint = printItems.length > 0;
 
   return (
@@ -606,6 +641,25 @@ export default function POS() {
         <select className="input" value={paymentAccountId} onChange={(e) => setPaymentAccountId(Number(e.target.value))} style={{ fontSize:"0.8rem", width:130 }}>
           {accounts?.map((a:any) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
+        {/* Payment: method radios + Full / Partial / Later, at the tier-button
+            scale — deliberately small and unobtrusive. Partial and Later need
+            a customer, so they stay disabled until one is picked. */}
+        <div style={{ display:"flex", gap:2, alignItems:"center", borderLeft:"1px solid #e2e8f0", paddingLeft:10 }}>
+          {(["cash","easypaisa","bank_transfer"] as PaymentMethod[]).map((m) => (
+            <button key={m} type="button" title={PAYMENT_METHOD_LABELS[m]} onClick={() => setPayMethod(m)} style={{ padding:"4px 8px", fontSize:"0.7rem", fontWeight:600, borderRadius:4, cursor:"pointer", whiteSpace:"nowrap", background: payMethod===m ? "#cbd5e1" : "#f1f5f9", color: payMethod===m ? "#1e293b" : "#64748b", border: `1px solid ${payMethod===m ? "#94a3b8" : "#e2e8f0"}` }}>{m === "bank_transfer" ? "Bank" : PAYMENT_METHOD_LABELS[m]}</button>
+          ))}
+        </div>
+        <div style={{ display:"flex", gap:2, alignItems:"center" }}>
+          {(["full","partial","later"] as PayChoice[]).map((c) => {
+            const disabled = c !== "full" && customerId == null;
+            return (
+              <button key={c} type="button" disabled={disabled} title={disabled ? "Pick a customer first" : c === "full" ? "Pay in full" : c === "partial" ? "Pay part now, rest owed" : "Pay nothing now, all owed"} onClick={() => setPayChoice(c)} style={{ padding:"4px 8px", fontSize:"0.7rem", fontWeight:600, borderRadius:4, cursor: disabled ? "not-allowed" : "pointer", whiteSpace:"nowrap", opacity: disabled ? 0.45 : 1, background: payChoice===c ? "#cbd5e1" : "#f1f5f9", color: payChoice===c ? "#1e293b" : "#64748b", border: `1px solid ${payChoice===c ? "#94a3b8" : "#e2e8f0"}` }}>{c === "full" ? "Full" : c === "partial" ? "Partial" : "Later"}</button>
+            );
+          })}
+          {payChoice === "partial" && (
+            <input className="input" placeholder="Paid now" inputMode="decimal" autoComplete="off" value={partialAmount} onChange={(e) => setPartialAmount(e.target.value)} style={{ fontSize:"0.8rem", width:80 }} />
+          )}
+        </div>
         <button type="button" onClick={() => setShowVehicle((v) => !v)} title="Vehicle details"
           style={{ padding:"4px 10px", fontSize:"0.7rem", fontWeight:600, borderRadius:4, cursor:"pointer", whiteSpace:"nowrap", background: showVehicle ? "#cbd5e1" : "#f1f5f9", color: showVehicle ? "#1e293b" : "#64748b", border: `1px solid ${showVehicle ? "#94a3b8" : "#e2e8f0"}` }}>
           Vehicle{vehicle.registration.trim() ? " *" : ""}
@@ -745,7 +799,7 @@ export default function POS() {
             </div>
             {canPrint && (
               <div style={{ borderTop:"1px dashed var(--color-border)", marginBottom:6 }}>
-                <POSPrint cart={printItems} total={printTotal} customerName={printName} customerPhone={printPhone} orderId={printOrderId} notes={printNotes} vehicle={printVehicle} mileage={printMileage} />
+                <POSPrint cart={printItems} total={printTotal} paidAmount={printPaidAmount} paymentMethod={printPaymentMethod} customerName={printName} customerPhone={printPhone} orderId={printOrderId} notes={printNotes} vehicle={printVehicle} mileage={printMileage} />
               </div>
             )}
             <button onClick={handleComplete} className="btn btn-success btn-full btn-lg" disabled={cart.length === 0 || tx.busy}>{tx.busy ? <TransactionSpinner label="Completing sale…" /> : "Complete Sale"}</button>

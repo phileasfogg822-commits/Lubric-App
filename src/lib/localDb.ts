@@ -105,6 +105,13 @@ CREATE TABLE IF NOT EXISTS party_ledger (
 );
 CREATE INDEX IF NOT EXISTS idx_ledger_party ON party_ledger(shop_id, party_type, party_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_ledger_updated ON party_ledger(shop_id, updated_at);
+-- One bill row and one payment row per order (mirrors server/migrations/
+-- 014_party_ledger.sql): a till sale posts its bill and its collection
+-- against the order, and this is what stops a retried sale from booking
+-- the same receivable twice. Sales never posted order-linked rows before
+-- batch 13 and the server already enforces it on pulled rows, so no
+-- existing local database can hold a duplicate this would trip on.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_order_kind ON party_ledger(order_id, kind) WHERE order_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_commitments_party ON commitments(shop_id, party_type, party_id, occurred_at);
 -- How one payment was split across the invoices it settled (migration 017).
 CREATE TABLE IF NOT EXISTS payable_allocations (

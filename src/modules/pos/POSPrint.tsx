@@ -3,6 +3,7 @@ import type { CartItem } from "../../lib/types";
 import { currency } from "../../lib/format";
 import { dbGet } from "../../lib/db";
 import { printStamp, setPrintFilename } from "../../lib/export";
+import { PAYMENT_METHOD_LABELS, type PaymentMethod } from "../../lib/payment";
 import type { SaleVehicle } from "./POSCart";
 
 type PrintFormat = "a4" | "a5" | "receipt" | "receipt_3inch";
@@ -10,6 +11,10 @@ type PrintFormat = "a4" | "a5" | "receipt" | "receipt_3inch";
 interface Props {
   cart: CartItem[];
   total: number;
+  /** Amount collected at the till; when it differs from the total the receipt shows Paid / Due. */
+  paidAmount?: number;
+  /** How the paid amount arrived; shown beside Paid. Defaults to cash. */
+  paymentMethod?: PaymentMethod;
   customerName: string;
   customerPhone?: string;
   orderId: number;
@@ -42,8 +47,14 @@ const FORMAT_LABEL: Record<PrintFormat, string> = {
   receipt_3inch: "Receipt 72mm",
 };
 
-export default function POSPrint({ cart, total, customerName, customerPhone, orderId, notes, vehicle, mileage = 0 }: Props) {
+export default function POSPrint({ cart, total, paidAmount, paymentMethod = "cash", customerName, customerPhone, orderId, notes, vehicle, mileage = 0 }: Props) {
   const [shop, setShop] = useState<ShopInfo>(FALLBACK_SHOP);
+
+  // Paid / Due only when the sale was not paid in full — a full payment
+  // reads exactly as before, with no extra lines on the paper.
+  const paid = paidAmount ?? total;
+  const due = Math.max(0, total - paid);
+  const showSplit = paid !== total;
 
   // Pull the real shop identity from the DB so receipts carry the business name.
   useEffect(() => {
@@ -123,6 +134,12 @@ export default function POSPrint({ cart, total, customerName, customerPhone, ord
           </table>
           <div style={{ borderTop: "2px solid #333", paddingTop: 12, textAlign: "right" }}>
             <p style={{ fontSize: 18, fontWeight: "bold", margin: 0 }}>Total: {currency(total)}</p>
+            {showSplit && (
+              <>
+                <p style={{ fontSize: 13, margin: "6px 0 0" }}>Paid ({PAYMENT_METHOD_LABELS[paymentMethod]}): {currency(paid)}</p>
+                <p style={{ fontSize: 13, fontWeight: "bold", margin: "4px 0 0" }}>Due: {currency(due)}</p>
+              </>
+            )}
           </div>
           {notes && <p style={{ fontSize: 12, color: "#666", marginTop: 16 }}>Notes: {notes}</p>}
           <p style={{ fontSize: 11, color: "#999", textAlign: "center", marginTop: 30 }}>Thank you!</p>
@@ -159,6 +176,12 @@ export default function POSPrint({ cart, total, customerName, customerPhone, ord
             ))}
           </div>
           <div style={{ textAlign: "right", fontWeight: "bold", fontSize: 13, marginBottom: 8 }}>TOTAL: {currency(total)}</div>
+          {showSplit && (
+            <div style={{ textAlign: "right", fontSize: 11, marginBottom: 8 }}>
+              <div>Paid ({PAYMENT_METHOD_LABELS[paymentMethod]}): {currency(paid)}</div>
+              <div style={{ fontWeight: "bold" }}>Due: {currency(due)}</div>
+            </div>
+          )}
           <div style={{ textAlign: "center", fontSize: 9, borderTop: "1px dashed #999", paddingTop: 6 }}>Thank you!</div>
         </div>
       </div>
@@ -191,6 +214,12 @@ export default function POSPrint({ cart, total, customerName, customerPhone, ord
             ))}
           </div>
           <div style={{ borderTop: "1px dashed #999", marginTop: 4, paddingTop: 4, textAlign: "right", fontWeight: "bold", fontSize: 11 }}>{currency(total)}</div>
+          {showSplit && (
+            <div style={{ textAlign: "right", fontSize: 9, marginTop: 2 }}>
+              <div>Paid ({PAYMENT_METHOD_LABELS[paymentMethod]}): {currency(paid)}</div>
+              <div style={{ fontWeight: "bold" }}>Due: {currency(due)}</div>
+            </div>
+          )}
         </div>
       </div>
 
