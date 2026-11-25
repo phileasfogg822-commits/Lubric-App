@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -10,6 +10,7 @@ import { dbSelect, dbGet, dbExecute } from "../../lib/db";
 import { useAuth } from "../../lib/auth";
 import { can } from "../../lib/permissions";
 import { currency, d } from "../../lib/format";
+import { last7Days, trendDaysParams } from "../../lib/trendDays";
 import { Page } from "../../components/Page";
 import { ReminderModal, ReminderDraft } from "../../components/ReminderModal";
 import { REMINDER_SELECT, kindMeta, relativeDue, priorityColor, bucketOf } from "../../lib/reminders";
@@ -81,33 +82,51 @@ export default function Dashboard() {
   });
 
   // ─── Analytics (charts) ─────────────────────────────────────────────
-  // The trend series is zero-filled by Postgres itself (generate_series) so
-  // quiet days still show on the axis; cost is merged in by day key below.
+  // The trend series is zero-filled by a 7-day UNION ALL series built in
+  // JS (src/lib/trendDays.ts), so quiet days still show on the axis; cost is
+  // merged in by day key below. The old form zero-filled with Postgres
+  // generate_series + to_char, which SQLite has neither of — the trend
+  // query died locally with "no such function: to_char" and the charts
+  // never rendered on the Windows app (same hole as the Expenses list,
+  // batch 10). The UNION ALL series runs verbatim on Postgres through
+  // /api/query, with the same $N binding on both engines. (A VALUES list
+  // would be shorter, but SQLite rejects a parenthesised VALUES with a
+  // column-name alias in the FROM clause — proven by the sim.)
+  const trendDays = useMemo(() => last7Days(), []);
+
   const { data: trendRows } = useQuery({
-    queryKey: ["analytics", "trend"],
+    queryKey: ["analytics", "trend", trendDays[0].day],
     queryFn: () => dbSelect<{ day: string; label: string; revenue: number; orders: number }>(
-      `SELECT to_char(d.day, 'YYYY-MM-DD') AS day,
-              to_char(d.day, 'Dy') AS label,
+      `SELECT d.day AS day,
+              d.label AS label,
               COALESCE(SUM(o.total), 0) AS revenue,
               COUNT(o.id) AS orders
-       FROM orders o
-       RIGHT JOIN generate_series(CURRENT_DATE - interval '6 days', CURRENT_DATE, interval '1 day') AS d(day)
-         ON o.created_at::date = d.day::date AND o.status = 'completed'
-       GROUP BY d.day
-       ORDER BY d.day`
+       FROM (SELECT $1 AS day, $2 AS label
+           UNION ALL SELECT $3, $4
+           UNION ALL SELECT $5, $6
+           UNION ALL SELECT $7, $8
+           UNION ALL SELECT $9, $10
+           UNION ALL SELECT $11, $12
+           UNION ALL SELECT $13, $14) AS d
+       LEFT JOIN orders o
+         ON substr(o.created_at::text, 1, 10) = d.day AND o.status = 'completed'
+       GROUP BY d.day, d.label
+       ORDER BY d.day`,
+      trendDaysParams(trendDays)
     ),
   });
 
   const { data: costRows } = useQuery({
-    queryKey: ["analytics", "cost"],
+    queryKey: ["analytics", "cost", trendDays[0].day],
     queryFn: () => dbSelect<{ day: string; cost: number }>(
-      `SELECT to_char(o.created_at, 'YYYY-MM-DD') AS day,
+      `SELECT substr(o.created_at::text, 1, 10) AS day,
               COALESCE(SUM(oi.qty * COALESCE(p.cost_price, 0)), 0) AS cost
        FROM orders o
        JOIN order_items oi ON oi.order_id = o.id AND oi.kind = 'product'
        LEFT JOIN products p ON p.id = oi.ref_id
-       WHERE o.status = 'completed' AND o.created_at >= CURRENT_DATE - interval '6 days'
-       GROUP BY 1 ORDER BY 1`
+       WHERE o.status = 'completed' AND substr(o.created_at::text, 1, 10) >= $1
+       GROUP BY 1 ORDER BY 1`,
+      [trendDays[0].day]
     ),
   });
 

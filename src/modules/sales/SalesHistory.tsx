@@ -127,7 +127,12 @@ export default function SalesHistory() {
     queryKey: ["txn-expenses", from, to],
     retry: false,
     queryFn: () => {
-      const DAY = "COALESCE(NULLIF(e.date, ''), to_char(e.created_at, 'YYYY-MM-DD'))";
+      // Portable on purpose: the old form used to_char(e.created_at,
+      // 'YYYY-MM-DD'), which is Postgres-only — SQLite has no to_char, so
+      // the filtered list died locally with "no such function: to_char"
+      // (same hole as the Expenses list, batch 10). substr on the ::text
+      // cast is the same TEXT 'YYYY-MM-DD' on both engines.
+      const DAY = "COALESCE(NULLIF(e.date, ''), substr(e.created_at::text, 1, 10))";
       const p: unknown[] = [];
       let w = "WHERE 1=1";
       if (from) { p.push(from); w += ` AND ${DAY} >= $${p.length}`; }

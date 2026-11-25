@@ -62,6 +62,7 @@ jobs:
           node --experimental-strip-types server/sim_sale_stock_guard.js
           node --experimental-strip-types server/sim_used_oil_notes.js
           node --experimental-strip-types server/sim_expenses_list.js
+          node --experimental-strip-types server/sim_sales_history_dashboard_trend.js
           node --experimental-strip-types server/sim_leftover_container_pricing.js
         shell: pwsh
 
