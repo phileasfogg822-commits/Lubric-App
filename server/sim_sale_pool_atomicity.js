@@ -298,7 +298,7 @@ function buildSaleStatements(oid, cart, customerId, userId, paymentAccountId, to
       );
     }
     if (item.kind === 'partial_container' && item.container_id) {
-      statements.push({ sql: "UPDATE containers SET remaining_volume = remaining_volume - $1, status = CASE WHEN remaining_volume - $1 <= 0 THEN 'empty' ELSE 'opened' END WHERE id = $2", params: [item.qty, item.container_id] });
+      statements.push({ sql: "UPDATE containers SET remaining_volume = GREATEST(0, remaining_volume - $1), status = CASE WHEN remaining_volume - $1 <= 0 THEN 'empty' ELSE 'opened' END WHERE id = $2", params: [item.qty, item.container_id] });
       statements.push({ sql: 'INSERT INTO container_splits (container_id, sold_qty, order_id) VALUES ($1, $2, $3)', params: [item.container_id, item.qty, oid] });
     }
     if (item.kind === 'used_oil') {

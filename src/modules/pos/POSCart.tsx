@@ -1,10 +1,31 @@
-import type { Product, CustomerType, CartItem } from "../../lib/types";
+import type { CartItem } from "../../lib/types";
 import { dbGet, dbExecute, dbSelect, dbTransaction } from "../../lib/db";
 
-import { resolvePrice, type PriceSource } from "../../lib/pricing";
 import { stockOut } from "../../lib/stock";
 import { newUuid } from "../../lib/uuid";
 
+// The pure cart helpers live in src/lib/cart.ts (moved there so they have a
+// test — node cannot import this .tsx file, which is how the addContainer
+// over-draw and the uncapped addProduct survived untested). Everything is
+// re-exported here, so POS.tsx / EditButton / POSPrint import sites are
+// untouched. The two names completeSale itself calls are imported as well:
+// an `export ... from` re-export alone creates no local binding.
+import { leftoverLitres, validateSaleStock } from "../../lib/cart";
+export {
+  leftoverLitres,
+  tierPrice,
+  effectiveUnitPrice,
+  repriceAll,
+  addProduct,
+  addService,
+  addContainer,
+  updateQty,
+  updatePrice,
+  updateCapacity,
+  toggleBillByCapacity,
+  toggleLeftoverToContainers,
+  validateSaleStock,
+} from "../../lib/cart";
 export type { CartItem };
 
 // Moved out to lib/units.ts and re-exported here, so the five existing call
@@ -13,180 +34,6 @@ export type { CartItem };
 // a 1kg tub of grease as "1 litre", and read "-4L" as 4 litres.
 import { packLitres } from "../../lib/units";
 export { packLitres };
-
-/**
- * How much oil is left in the bottle: pack size minus what the engine took.
- * A 4L bottle into a 3.5L engine leaves 0.5L. Returns 0 when the capacity is
- * unknown, or when it meets/exceeds the pack (customer keeps the whole bottle).
- */
-export function leftoverLitres(item: CartItem): number {
-  const pack = packLitres(item.product);
-  const cap = item.capacity ?? 0;
-  if (pack <= 0 || cap <= 0 || cap >= pack) return 0;
-  return Math.round((pack - cap) * 1000) / 1000;
-}
-
-/**
- * Price for one line, before any capacity pro-rating.
- *
- * This used to be `pf()`, a second copy of the tier rules that already lived in
- * POSSearch.tsx. Two copies of a pricing rule is how a customer gets quoted one
- * number in the search results and charged another in the cart, so the rule now
- * lives once in src/lib/pricing.ts and both screens call it.
- *
- * `ctx` is the customer's price context (their price list and any individually
- * agreed prices). It is optional and defaults to empty, which resolves through
- * the product's own tier columns exactly as before - that fallback is what lets
- * this ship without changing a single price the shop already charges.
- */
-export function tierPrice(
-  p: Product,
-  ct: CustomerType,
-  qty: number,
-  ctx: PriceSource = {}
-): number {
-  return resolvePrice(p.id, ct, qty, { ...ctx, product: p }).price || 0;
-}
-
-/**
- * Price for a single line, honouring the "bill by capacity" switch.
- *
- * A 4L bottle at 4000 poured into a 3.5L engine is billed 3.5/4 x 4000 = 3500
- * when the switch is on. With it off (or no capacity recorded, or the capacity
- * meeting/exceeding the pack) the full bottle price applies.
- */
-export function effectiveUnitPrice(item: CartItem, tierPrice: number): number {
-  if (item.kind !== "product" || !item.billByCapacity) return tierPrice;
-  const pack = packLitres(item.product);
-  const cap = item.capacity ?? 0;
-  if (pack <= 0 || cap <= 0 || cap >= pack) return tierPrice;
-  return Math.round(tierPrice * (cap / pack) * 100) / 100; // paisa-safe
-}
-
-/** Re-price a single line from its product + tier, applying capacity pro-rating. */
-function reprice(item: CartItem, ct: CustomerType, ctx: PriceSource): CartItem {
-  if (item.kind !== "product" || !item.product) return item;
-  const u = effectiveUnitPrice(item, tierPrice(item.product, ct, item.qty, ctx));
-  return { ...item, unit_price: u, line_total: u * item.qty };
-}
-
-/**
- * Re-price every product line.
- *
- * Called whenever the answer could have changed: the tier switched, a customer
- * was chosen, or a capacity was entered. All three change what an item costs,
- * so all three route through here rather than each nudging prices itself.
- */
-export function repriceAll(cart: CartItem[], ct: CustomerType, ctx: PriceSource = {}): CartItem[] {
-  return cart.map((x) => reprice(x, ct, ctx));
-}
-
-export function addProduct(
-  cart: CartItem[],
-  p: Product,
-  ct: CustomerType,
-  products: Product[],
-  ctx: PriceSource = {}
-): CartItem[] {
-  const ex = cart.find((x) => x.kind === "product" && x.ref_id === p.id);
-  if (ex) return cart.map((x) => {
-    if (x !== ex) return x;
-    const nq = x.qty + 1;
-    const u = effectiveUnitPrice(x, tierPrice(p, ct, nq, ctx));
-    return { ...x, qty: nq, unit_price: u, line_total: u * nq };
-  });
-  const fresh: CartItem = {
-    id: `p-${p.id}-${Date.now()}`, kind: "product", ref_id: p.id, name: p.name,
-    qty: 1, unit_price: 0, line_total: 0, product: p,
-    // Defaults: charged for what the engine takes, remainder back on the shelf.
-    billByCapacity: true, leftoverToContainers: true,
-  };
-  const u = effectiveUnitPrice(fresh, tierPrice(p, ct, 1, ctx));
-  return [...cart, { ...fresh, unit_price: u, line_total: u }];
-}
-
-export function addService(cart: CartItem[], s: { id: number; name: string; price: number }): CartItem[] {
-  const ex = cart.find((x) => x.kind === "service" && x.ref_id === s.id);
-  if (ex) return cart.map((x) => x === ex ? { ...x, qty: x.qty + 1, line_total: x.unit_price * (x.qty + 1) } : x);
-  return [...cart, { id: `s-${s.id}-${Date.now()}`, kind: "service", ref_id: s.id, name: s.name, qty: 1, unit_price: s.price, line_total: s.price }];
-}
-
-/**
- * Add a partial container (leftover oil) to the cart.
- *
- * A container line bills by the LITRE drawn, never by the bottle: `qty` is
- * litres, capped at the first litre (or the whole remainder when it is under
- * a litre), and `unitPrice` is the PER-LITRE price of this exact bottle.
- *
- * The per-litre price is resolved by the caller (POS.tsx) through
- * containerUnitPrice in src/lib/pricing.ts — the recorded sale for this
- * bottle first, else the product's own tier columns, never a negotiated
- * price — and passed in here, because resolving it here would throw inside
- * this setState updater when the bottle cannot be priced. The existing-line
- * branch re-uses the line's own unit_price, so a second tap only draws one
- * more litre (still capped at what is left) at the same per-litre price.
- */
-export function addContainer(
-  cart: CartItem[],
-  c: any,
-  unitPrice: number
-): CartItem[] {
-  const ex = cart.find((x) => x.kind === "partial_container" && x.container_id === c.id);
-  if (ex) return cart.map((x) => x === ex && x.qty < c.remaining_volume ? { ...x, qty: x.qty + 1, line_total: x.unit_price * (x.qty + 1) } : x);
-  // Start at one litre — or the whole remainder when it is under a litre.
-  // The old code always started at qty 1, which on a 0.5L container drew
-  // half a litre more than the bottle holds (remaining went to -0.5).
-  const qty = Math.min(1, Math.max(0, Number(c.remaining_volume) || 0));
-  if (!(qty > 0)) return cart;
-  return [...cart, { id: `c-${c.id}-${Date.now()}`, kind: "partial_container", ref_id: c.id, name: `${c.product_name} (${c.remaining_volume.toFixed(1)}L left)`, qty, unit_price: unitPrice, line_total: Math.round(unitPrice * qty * 100) / 100, container_id: c.id, max_qty: c.remaining_volume }];
-}
-
-export function updateQty(
-  cart: CartItem[],
-  id: string,
-  qty: number,
-  ct: CustomerType,
-  ctx: PriceSource = {}
-): CartItem[] {
-  return cart.map((x) => {
-    if (x.id !== id) return x;
-    const max = x.max_qty ?? 9999;
-    const nq = Math.max(0, Math.min(qty, max));
-    if (nq === 0) return x;
-    if (x.kind === "product" && x.product) {
-      const u = effectiveUnitPrice(x, tierPrice(x.product, ct, nq, ctx));
-      return { ...x, qty: nq, unit_price: u, line_total: u * nq };
-    }
-    return { ...x, qty: nq, line_total: x.unit_price * nq };
-  }).filter((x) => x.qty > 0);
-}
-
-export function updatePrice(cart: CartItem[], id: string, price: number): CartItem[] {
-  return cart.map((x) => x.id === id ? { ...x, unit_price: price, line_total: price * x.qty } : x);
-}
-
-/**
- * Set the engine oil capacity on a line and re-price it.
- * The capacity drives both the pro-rated price and the leftover volume.
- */
-export function updateCapacity(cart: CartItem[], id: string, litres: number, ct: CustomerType): CartItem[] {
-  return repriceAll(cart.map((x) => (x.id === id ? { ...x, capacity: litres } : x)), ct);
-}
-
-/**
- * Turn capacity-based billing on/off for a line.
- * Turning it on also sends the unused oil back to the containers shelf, so the
- * switch defaults behave the way the shop expects; the operator can override
- * the leftover destination afterwards.
- */
-export function toggleBillByCapacity(cart: CartItem[], id: string, on: boolean, ct: CustomerType): CartItem[] {
-  return repriceAll(cart.map((x) => (x.id === id ? { ...x, billByCapacity: on, leftoverToContainers: on } : x)), ct);
-}
-
-/** Choose where the unused oil goes: back on the shelf, or home with the customer. */
-export function toggleLeftoverToContainers(cart: CartItem[], id: string, toContainers: boolean): CartItem[] {
-  return cart.map((x) => (x.id === id ? { ...x, leftoverToContainers: toContainers } : x));
-}
 
 export interface SaleVehicle {
   registration: string;
@@ -207,6 +54,32 @@ export async function completeSale(
   notes: string,
   vehicle?: SaleVehicle | null
 ): Promise<number> {
+  // Stock guard — FIRST, before any write (before the order id is reserved
+  // and before the vehicle is touched): a sale must never take more than
+  // the shop has. The old code checked nothing, so a finished product
+  // could be sold until its stock read -2 and a container to -0.5L
+  // (reported 2026-11-25). The availability is read live here, not taken
+  // from the cart, so a stale figure can never oversell; the cart's own
+  // caps (lib/cart.ts) are only the first line of defence. A blocked sale
+  // throws with the product and the amount left, and writes nothing — the
+  // operator sees it in the error banner and the stock stays put.
+  const needProductIds = [...new Set(cart.filter((x) => x.kind === "product" && x.qty > 0).map((x) => x.ref_id))];
+  const needContainerIds = [...new Set(cart.filter((x) => x.kind === "partial_container" && x.qty > 0 && x.container_id).map((x) => x.container_id as number))];
+  const stockById = new Map<number, { name: string; qty: number }>();
+  for (const pid of needProductIds) {
+    const row = await dbGet<{ name: string; stock_qty: number }>(
+      "SELECT name, stock_qty FROM products WHERE id = $1", [pid]);
+    stockById.set(pid, { name: row?.name ?? `product #${pid}`, qty: Number(row?.stock_qty ?? 0) || 0 });
+  }
+  const containersById = new Map<number, { name: string; remaining: number }>();
+  for (const cid of needContainerIds) {
+    const row = await dbGet<{ product_name: string; remaining_volume: number }>(
+      "SELECT p.name AS product_name, c.remaining_volume FROM containers c JOIN products p ON p.id = c.product_id WHERE c.id = $1", [cid]);
+    containersById.set(cid, { name: row?.product_name ?? `container #${cid}`, remaining: Number(row?.remaining_volume ?? 0) || 0 });
+  }
+  const short = validateSaleStock(cart, stockById, containersById);
+  if (short) throw new Error(short);
+
   // Reserve the order id up-front so the order row and every child row commit
   // together. (nextval is never rolled back, so a failed sale only leaves a gap.)
   const seq = await dbGet<{ oid: string }>("SELECT nextval(pg_get_serial_sequence('orders', 'id')) AS oid");
@@ -286,7 +159,12 @@ export async function completeSale(
       );
     }
     if (item.kind === "partial_container" && item.container_id) {
-      statements.push({ sql: "UPDATE containers SET remaining_volume = remaining_volume - $1, status = CASE WHEN remaining_volume - $1 <= 0 THEN 'empty' ELSE 'opened' END WHERE id = $2", params: [item.qty, item.container_id] });
+      // The draw is clamped at zero, like the edit/void paths already do:
+      // the guard above blocks an over-draw with a clear error, and this
+      // is the backstop so a draw can never take a bottle below zero even
+      // if the guard's snapshot is stale. The old unclamped form is what
+      // left a container at -0.5L (reported 2026-11-25).
+      statements.push({ sql: "UPDATE containers SET remaining_volume = GREATEST(0, remaining_volume - $1), status = CASE WHEN remaining_volume - $1 <= 0 THEN 'empty' ELSE 'opened' END WHERE id = $2", params: [item.qty, item.container_id] });
       statements.push({ sql: "INSERT INTO container_splits (container_id, sold_qty, order_id) VALUES ($1, $2, $3)", params: [item.container_id, item.qty, oid] });
     }
     if (item.kind === "used_oil") {

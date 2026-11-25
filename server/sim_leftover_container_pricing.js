@@ -299,7 +299,7 @@ function containerSaleStatements(oid, containerId, qty, unitPrice) {
       params: [oid, 'partial_container', containerId, 'GTX 4L (0.5L left)', qty, unitPrice, lineTotal, containerId, qty, 0, 'customer', 0, 0],
     },
     {
-      sql: "UPDATE containers SET remaining_volume = remaining_volume - $1, status = CASE WHEN remaining_volume - $1 <= 0 THEN 'empty' ELSE 'opened' END WHERE id = $2",
+      sql: "UPDATE containers SET remaining_volume = GREATEST(0, remaining_volume - $1), status = CASE WHEN remaining_volume - $1 <= 0 THEN 'empty' ELSE 'opened' END WHERE id = $2",
       params: [qty, containerId],
     },
     {
@@ -357,13 +357,16 @@ check('regression: 4L bottle into a 3.5L engine still bills 3500 and shelves 0.5
 
 // ── 11. source tie-in: the .tsx calls the resolver ───────────────────────
 check('source tie-in: addContainer no longer prices from the negotiated tier', () => {
-  const cart = readFileSync(new URL('../src/modules/pos/POSCart.tsx', import.meta.url), 'utf8');
+  // Batch 8 moved the pure cart helpers out of POSCart.tsx into
+  // src/lib/cart.ts (node cannot import .tsx — that is how the addContainer
+  // over-draw survived untested). POSCart re-exports them; the body lives here.
+  const cart = readFileSync(new URL('../src/lib/cart.ts', import.meta.url), 'utf8');
   // Scope the assertion to addContainer itself: tierPrice is still the right
   // call for full product lines (addProduct/reprice), just not for a
   // leftover bottle.
   const start = cart.indexOf('export function addContainer(');
   const end = cart.indexOf('export function updateQty(', start);
-  assert(start > 0 && end > start, 'addContainer not found in POSCart.tsx');
+  assert(start > 0 && end > start, 'addContainer not found in src/lib/cart.ts');
   const addContainerBody = cart.slice(start, end);
   assert(!addContainerBody.includes('tierPrice'), 'addContainer must not call tierPrice for the container line');
   assert(addContainerBody.includes('unitPrice: number'), 'addContainer must take the resolved per-litre price in');

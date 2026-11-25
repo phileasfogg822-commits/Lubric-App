@@ -80,7 +80,7 @@ const SALE_STATEMENTS = [
   'INSERT INTO order_items (order_id, kind, ref_id, product_name, qty, unit_price, line_total, container_id, capacity, leftover_litres, leftover_to, leftover_released, billed_by_capacity) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)',
   "INSERT INTO containers (shop_id, product_id, original_volume, remaining_volume, status, opened_at, source_order_id) VALUES (1, $1, $2, $3, 'opened', NOW()::text, $4)",
   ...stockOut(1, 2, 'sale', 'uuid-sale-1', { table: 'orders', id: 101 }).map((s) => s.sql),
-  "UPDATE containers SET remaining_volume = remaining_volume - $1, status = CASE WHEN remaining_volume - $1 <= 0 THEN 'empty' ELSE 'opened' END WHERE id = $2",
+  "UPDATE containers SET remaining_volume = GREATEST(0, remaining_volume - $1), status = CASE WHEN remaining_volume - $1 <= 0 THEN 'empty' ELSE 'opened' END WHERE id = $2",
   'INSERT INTO container_splits (container_id, sold_qty, order_id) VALUES ($1, $2, $3)',
   'UPDATE used_oil_drum SET current_litres = current_litres + $1 WHERE id = 1',
   "INSERT INTO used_oil_log (drum_id, litres, type, source_order_id) VALUES (1, $1, 'added', $2)",

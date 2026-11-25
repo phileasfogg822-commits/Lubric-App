@@ -59,6 +59,7 @@ jobs:
           node --experimental-strip-types server/sim_sale_2067_deterministic.js
           node --experimental-strip-types server/sim_sale_pool_atomicity.js
           node --experimental-strip-types server/sim_sale_uuid_binding.js
+          node --experimental-strip-types server/sim_sale_stock_guard.js
           node --experimental-strip-types server/sim_leftover_container_pricing.js
         shell: pwsh
 

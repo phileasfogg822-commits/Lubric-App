@@ -1,5 +1,6 @@
 import { dbSelect, dbTransaction } from "../../lib/db";
 import { stockIn, stockStatements } from "../../lib/stock";
+import { validateSaleStock } from "../../lib/cart";
 import { newUuid } from "../../lib/uuid";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -86,6 +87,25 @@ export async function saveOrderEdits(
   const delta: Record<number, number> = {};
   for (const o of old) if (o.kind === "product") delta[o.ref_id] = (delta[o.ref_id] ?? 0) + o.qty;
   for (const n of lines) if (n.kind === "product") delta[n.ref_id] = (delta[n.ref_id] ?? 0) - n.qty;
+  // Stock guard: an edit that grows a line must not take more than the shop
+  // has — the same rule as a new sale (validateSaleStock, lib/cart.ts).
+  // Only net OUT deltas are checked: a shrunk bill restocks, it cannot
+  // oversell. Runs before any statement is built, so a blocked edit
+  // writes nothing.
+  {
+    const outLines: { kind: string; ref_id: number; name: string; qty: number }[] = [];
+    const stockById = new Map<number, { name: string; qty: number }>();
+    for (const [pid, d] of Object.entries(delta)) {
+      if (!(d < 0)) continue;
+      const row = await dbSelect<{ name: string; stock_qty: number }>(
+        "SELECT name, stock_qty FROM products WHERE id = $1", [Number(pid)]);
+      const name = row[0]?.name ?? `product #${pid}`;
+      stockById.set(Number(pid), { name, qty: Number(row[0]?.stock_qty ?? 0) || 0 });
+      outLines.push({ kind: "product", ref_id: Number(pid), name, qty: -d });
+    }
+    const short = validateSaleStock(outLines, stockById, new Map());
+    if (short) throw new Error(short);
+  }
   for (const [pid, d] of Object.entries(delta)) {
     if (!d) continue;
     // A signed adjustment through the ledger. The bill shrank, so stock goes

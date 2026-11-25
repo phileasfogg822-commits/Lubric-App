@@ -138,6 +138,15 @@ export function pgToSqlite(sql: string): string {
     .replace(/\bdate_trunc\(\s*'day'\s*,\s*([^)]+?)\s*\)/gi, "date($1)")
     .replace(/\bdate_trunc\(\s*'month'\s*,\s*([^)]+?)\s*\)/gi, "date($1, 'start of month')")
     .replace(/\bdate_trunc\(\s*'week'\s*,\s*([^)]+?)\s*\)/gi, "date($1, 'weekday 0', '-6 days')")
+    // GREATEST(a, b) → MAX(a, b): SQLite has no GREATEST, and the
+    // container drawdowns (sale path in POSCart.tsx, edit path in
+    // editSale.ts) plus the used-oil drum clamp all write GREATEST(0, ...).
+    // Without this rule a Windows sale drawing from a leftover container
+    // died inside its transaction with "no such function: GREATEST" — the
+    // edit path had the same latent failure. SQLite's multi-argument MAX
+    // is the same scalar maximum (NULL handling matches for our uses:
+    // the first argument is the literal 0, the second a NOT NULL column).
+    .replace(/\bGREATEST\s*\(\s*([^,()]+?)\s*,\s*([^()]+?)\s*\)/gi, "MAX($1, $2)")
     .replace(/\bNOW\(\s*\)/gi, "datetime('now')")
     // nextval(pg_get_serial_sequence('table', 'col')) — SQLite has no
     // sequences. The single-device local DB takes max(col)+1 instead.
@@ -604,6 +613,57 @@ async function patchOrderItemsUuidOrphans(db: { execute: (s: string) => Promise<
        AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.id = order_items.order_id)`);
 }
 
+/**
+ * Repair negative stock left by pre-batch-8 overselling.
+ *
+ * Before batch 8 nothing checked stock at the sale, so a finished product
+ * could be sold until products.stock_qty read -2 and a container was drawn
+ * to -0.5L (reported 2026-11-25). The sale guard stops new oversells;
+ * this repairs the damage already on the shelf. Negatives only: a product
+ * or a per-warehouse figure below zero is clamped to zero, and a container
+ * below zero is emptied — no real stock is touched, and no row is deleted.
+ * The ledger is left alone (its movements are history; the mismatch, if
+ * any, is what reconcileStock reports for the owner to count-correct).
+ * Idempotent: a healthy database matches nothing. Note the products UPDATE
+ * queues an outbox 'update' row when the trigger exists (outbox.ts) — that
+ * is a legitimate state change, not a bogus identity, so it is left to sync
+ * like any other correction; containers have no uuid column locally and
+ * therefore no trigger at all.
+ */
+async function patchNegativeStock(db: { execute: (s: string) => Promise<unknown> }): Promise<void> {
+  await db.execute(`UPDATE products SET stock_qty = 0 WHERE stock_qty < 0`);
+  await db.execute(`UPDATE stock_levels SET qty = 0 WHERE qty < 0`);
+  await db.execute(`UPDATE containers SET remaining_volume = 0, status = 'empty' WHERE remaining_volume < 0`);
+}
+
+/**
+ * Repair phantom containers — the "1 extra leftover" (reported 2026-11-25).
+ *
+ * One sale makes one leftover per product, so two rows sharing a
+ * (source_order_id, product_id) are the same physical bottle counted
+ * twice: a v6-era retry committed the container INSERT while the order
+ * itself never landed, and the next sale (reusing the gap oid) shelved
+ * the same bottle again. Likewise a row whose order never landed at all
+ * is a leftover from a sale that never completed. Keep the first row of
+ * each pair (the original bottle) and empty the rest; empty the orphans.
+ * Rows stay for history — only the phantom stock leaves the picker (which
+ * already requires remaining_volume > 0). Manual containers have a NULL
+ * source_order_id and are untouched, and containers never sync
+ * (SYNC_TABLES, sync.ts), so no synced row can be mistaken for an
+ * orphan. Idempotent: a healthy database matches nothing.
+ */
+async function patchDuplicateContainers(db: { execute: (s: string) => Promise<unknown> }): Promise<void> {
+  await db.execute(`
+    UPDATE containers SET remaining_volume = 0, status = 'empty'
+     WHERE source_order_id IS NOT NULL AND id NOT IN (
+       SELECT MIN(id) FROM containers WHERE source_order_id IS NOT NULL GROUP BY source_order_id, product_id
+     )`);
+  await db.execute(`
+    UPDATE containers SET remaining_volume = 0, status = 'empty'
+     WHERE source_order_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.id = containers.source_order_id)`);
+}
+
 async function ensureDefaultWarehouses(db: { execute: (s: string) => Promise<unknown> }): Promise<void> {
   await db.execute(`
     INSERT INTO warehouses (uuid, shop_id, name, code, is_default, active)
@@ -658,6 +718,14 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       // or a later sale reusing the gap oid 2067s against them (see
       // patchOrderItemsUuidOrphans above).
       await patchOrderItemsUuidOrphans(db);
+      // Pre-batch-8 sales could take more than the shop had (a product at
+      // -2, a container at -0.5L, and one extra leftover in the picker —
+      // reported 2026-11-25). The sale guard stops new oversells; these
+      // two repairs clean up the damage already on the shelf (see
+      // patchNegativeStock / patchDuplicateContainers above). Negatives
+      // and phantoms only — no real stock is touched.
+      await patchNegativeStock(db);
+      await patchDuplicateContainers(db);
       // The sync pull upserts on uuid, so the local table needs it UNIQUE -
       // without this, replaying the same rows raises a constraint error and the
       // offline replica silently stops accepting them.

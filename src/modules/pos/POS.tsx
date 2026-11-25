@@ -469,17 +469,28 @@ export default function POS() {
   function handleSearchSelect(item: SearchResult) {
     if (item.type === "product") {
       const p = products?.find((pr) => pr.id === item.id);
-      if (p) setCart((c) => {
-        const cap = defaultCapacity;
-        const next = addProduct(c, p, customerType, products ?? [], priceCtx);
-        if (!(cap > 0)) return next;
-        // Apply the remembered capacity, then re-price so the pro-rating lands.
-        return repriceAll(
-          next.map((x) => x.kind === "product" && !x.capacity ? { ...x, capacity: cap } : x),
-          customerType,
-          priceCtx
-        );
-      });
+      if (p) {
+        // Nothing left to sell: say so instead of adding a line the sale
+        // would only reject (the cart cap and the sale guard agree, and
+        // both read the same figure). Unknown stock (NULL) is not blocked
+        // — a missing figure must never stop a sale the shop could fulfil.
+        const onHand = Number(p.stock_qty);
+        if (Number.isFinite(onHand) && onHand <= 0) {
+          setError(`"${p.name}" is out of stock — nothing left to sell.`);
+          return;
+        }
+        setCart((c) => {
+          const cap = defaultCapacity;
+          const next = addProduct(c, p, customerType, products ?? [], priceCtx);
+          if (!(cap > 0)) return next;
+          // Apply the remembered capacity, then re-price so the pro-rating lands.
+          return repriceAll(
+            next.map((x) => x.kind === "product" && !x.capacity ? { ...x, capacity: cap } : x),
+            customerType,
+            priceCtx
+          );
+        });
+      }
     } else if (item.type === "service") {
       setCart((c) => addService(c, item.raw));
     } else if (item.type === "container") {
