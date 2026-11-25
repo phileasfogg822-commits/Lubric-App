@@ -28,8 +28,19 @@ function meta(key: string) {
   return CATEGORIES.find((c) => c.key === key) ?? { key, icon: "🧾", color: "#94a3b8", subs: ["Other"] };
 }
 
-/** expenses.date is free text; fall back to the created day when it is blank. */
-const DAY = "COALESCE(NULLIF(e.date, ''), to_char(e.created_at, 'YYYY-MM-DD'))";
+/**
+ * expenses.date is free text; fall back to the created day when it is blank.
+ *
+ * Portable on purpose: the old form used to_char(e.created_at, 'YYYY-MM-DD'),
+ * which is Postgres-only — SQLite has no to_char, so the list query died
+ * locally with "no such function: to_char" and the page showed "No expenses"
+ * with a 0 total even though the rows were recorded (the write succeeded and
+ * the "Expense recorded" toast showed). substr(..., 1, 10) returns the same
+ * TEXT 'YYYY-MM-DD' on both engines: created_at is ISO text locally, and on
+ * Postgres the explicit ::text cast (stripped by pgToSqlite locally) makes
+ * the timestamptz render as ISO text first.
+ */
+const DAY = "COALESCE(NULLIF(e.date, ''), substr(e.created_at::text, 1, 10))";
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -54,8 +65,14 @@ interface Expense {
 
 export default function Expenses() {
   const qc = useQueryClient();
-  const { hasPermission } = useAuth();
+  const { hasPermission, activeShopId, user } = useAuth();
   const canManage = hasPermission(PERMISSIONS.EXPENSES_MANAGE);
+  // The outlet being worked in — the same value sent as X-Shop-Id, so it is
+  // the shop the server's row security scopes this session to. Recording the
+  // expense into it (instead of a hardcoded 1) is what makes the write and
+  // the read agree: on the server the INSERT's WITH CHECK passes by
+  // construction and the RLS-filtered list shows the row; locally the shop
+  // is always 1, so this changes nothing there.
 
   const [df, setDf] = useState("");
   const [dt, setDt] = useState("");
@@ -169,10 +186,16 @@ export default function Expenses() {
           },
         ]);
       } else {
+        // Record into the active outlet (see the note on activeShopId
+        // above): a hardcoded 1 disagrees with the session's shop whenever
+        // the user works in another outlet, and on the server the row
+        // security policy then either rejects the INSERT or hides the row
+        // from the list — recorded, but the page still says 0.
+        const shopId = activeShopId ?? user?.shop_id ?? 1;
         await dbTransaction([
           {
-            sql: "INSERT INTO expenses (shop_id, category, subcategory, amount, account_id, date, note) VALUES (1,$1,$2,$3,$4,$5,$6)",
-            params: [form.category, form.subcategory, amount, form.account_id, form.date, form.note],
+            sql: "INSERT INTO expenses (shop_id, category, subcategory, amount, account_id, date, note) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+            params: [shopId, form.category, form.subcategory, amount, form.account_id, form.date, form.note],
           },
           { sql: "UPDATE accounts SET balance = balance - $1 WHERE id = $2", params: [amount, form.account_id] },
           {
