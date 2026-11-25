@@ -169,8 +169,50 @@ export function injectUuid(
   const rest = sql.slice(close + 1).trim();
   if (rest.startsWith(",")) return null; // multi-row VALUES — refuse
 
+  // The uuid rides a NUMBERED placeholder, never a bare `?`. The local
+  // driver is sqlx (see src/lib/db.ts): its SQLite binder gives a bare `?`
+  // the FIRST bound value — SqliteArguments::bind counts only unnamed
+  // parameters — so `VALUES ($1, .., $13, ?)` stored values[0] (the order
+  // id) as the uuid, and the second line of any multi-item sale died with
+  // 2067 on order_items.uuid (reported 2026-11-25 on v7). $K, with K one
+  // past the highest $N in the statement, binds values[K-1] = the fresh
+  // uuid under sqlx; the Capacitor driver rewrites $n to `?` positionally
+  // (capDb.ts) and the uuid is appended last in both SQL and params, so it
+  // binds correctly there too. The scan is quote-aware: a `$` inside a
+  // string literal is data, not a placeholder.
+  let maxN = 0;
+  let sq = false;
+  let dq = false;
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (sq) {
+      if (ch === "'") {
+        if (sql[i + 1] === "'") i++;
+        else sq = false;
+      }
+      continue;
+    }
+    if (dq) {
+      if (ch === '"') {
+        if (sql[i + 1] === '"') i++;
+        else dq = false;
+      }
+      continue;
+    }
+    if (ch === "'") { sq = true; continue; }
+    if (ch === '"') { dq = true; continue; }
+    if (ch === "$") {
+      let j = i + 1;
+      while (/[0-9]/.test(sql[j] ?? "")) j++;
+      if (j > i + 1) {
+        maxN = Math.max(maxN, Number(sql.slice(i + 1, j)));
+        i = j - 1;
+      }
+    }
+  }
+
   const colClose = sql.indexOf(")", m.index);
   const newSql =
-    sql.slice(0, colClose) + ", uuid" + sql.slice(colClose, close) + ", ?" + sql.slice(close);
+    sql.slice(0, colClose) + ", uuid" + sql.slice(colClose, close) + `, $${maxN + 1}` + sql.slice(close);
   return { sql: newSql, params: [...params, newUuid()] };
 }

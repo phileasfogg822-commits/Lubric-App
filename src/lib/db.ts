@@ -258,8 +258,9 @@ export async function dbExecute(sql: string, params: unknown[] = []): Promise<{ 
       const db: any = await getLocal();
       // A local INSERT into a replicated table needs a uuid, or the outbox
       // trigger skips it and the row never syncs. Injected before the
-      // Postgres→SQLite translation; the appended ? is last, so positional
-      // params stay aligned on both the Tauri and Capacitor drivers.
+      // Postgres→SQLite translation; injectUuid appends the uuid as a
+      // numbered placeholder ($K, K past the highest $N) — a bare `?` would
+      // bind the FIRST value under sqlx, not the uuid (see outbox.ts).
       const inj = injectUuid(sql, params, SYNC_TABLES);
       const finalSql = inj ? inj.sql : sql;
       const finalParams = inj ? inj.params : params;

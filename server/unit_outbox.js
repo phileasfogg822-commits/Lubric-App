@@ -37,7 +37,7 @@ const TABLES = ['products', 'orders', 'customers'];
 check('injectUuid appends uuid column, placeholder and param', () => {
   const r = injectUuid('INSERT INTO products (name, price_returning) VALUES ($1, $2)', ['Tea', 500], TABLES);
   if (!r) throw new Error('expected a rewrite');
-  eq(r.sql, 'INSERT INTO products (name, price_returning, uuid) VALUES ($1, $2, ?)');
+  eq(r.sql, 'INSERT INTO products (name, price_returning, uuid) VALUES ($1, $2, $3)');
   eq(r.params.slice(0, 2), ['Tea', 500]);
   if (typeof r.params[2] !== 'string' || r.params[2].length < 32) throw new Error('uuid param missing');
 });
@@ -61,13 +61,13 @@ check('injectUuid leaves multi-row VALUES alone', () => {
 check('injectUuid handles OR IGNORE and keeps RETURNING', () => {
   const r = injectUuid('INSERT OR IGNORE INTO customers (name) VALUES ($1) RETURNING id', ['Ali'], TABLES);
   if (!r) throw new Error('expected a rewrite');
-  eq(r.sql, 'INSERT OR IGNORE INTO customers (name, uuid) VALUES ($1, ?) RETURNING id');
+  eq(r.sql, 'INSERT OR IGNORE INTO customers (name, uuid) VALUES ($1, $2) RETURNING id');
 });
 
 check('injectUuid survives a literal parenthesis in VALUES', () => {
   const r = injectUuid("INSERT INTO products (name) VALUES ($1)", ['a(b'], TABLES);
   if (!r) throw new Error('expected a rewrite');
-  eq(r.sql, 'INSERT INTO products (name, uuid) VALUES ($1, ?)');
+  eq(r.sql, 'INSERT INTO products (name, uuid) VALUES ($1, $2)');
 });
 
 check('injectUuid ignores UPDATE/DELETE/SELECT', () => {

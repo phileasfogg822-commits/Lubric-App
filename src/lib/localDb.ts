@@ -572,6 +572,38 @@ async function patchOrderItemsUuidDuplicates(db: { execute: (s: string) => Promi
      )`);
 }
 
+/**
+ * Repair orphaned order_items rows left by pre-v7 partial commits.
+ *
+ * Before batch 6 the sale was not one transaction, so a failed sale could
+ * leave its order_items rows committed while the order itself never landed
+ * (and before batch 7 injectUuid's bare `?` wrote the order id, not a uuid,
+ * into those rows). The batch-4 patch NULLs only DUPLICATES, so a lone
+ * orphan keeps its bogus uuid — and a later sale reusing that gap oid
+ * (nextval is MAX(id)+1) 2067s against it. NULL the uuids of every line
+ * whose order does not exist, and drop their outbox rows first so a bogus
+ * identity never pushes: the server upserts by uuid, and a pushed orphan
+ * would land in the cloud as a line keyed by an order id. Non-destructive
+ * like the duplicate patch (the lines stay readable in history); idempotent.
+ * The outbox table may not exist yet on a fresh DB — ensureOutbox runs
+ * later in schema init — so a missing table is a no-op, not a failure.
+ */
+async function patchOrderItemsUuidOrphans(db: { execute: (s: string) => Promise<unknown> }): Promise<void> {
+  try {
+    await db.execute(`
+      DELETE FROM sync_outbox
+       WHERE table_name = 'order_items' AND row_uuid IN (
+         SELECT uuid FROM order_items
+          WHERE uuid IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.id = order_items.order_id)
+       )`);
+  } catch { /* sync_outbox not created yet on a fresh DB */ }
+  await db.execute(`
+    UPDATE order_items SET uuid = NULL
+     WHERE uuid IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.id = order_items.order_id)`);
+}
+
 async function ensureDefaultWarehouses(db: { execute: (s: string) => Promise<unknown> }): Promise<void> {
   await db.execute(`
     INSERT INTO warehouses (uuid, shop_id, name, code, is_default, active)
@@ -621,6 +653,11 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       // first: keep the original line per uuid, NULL the rest (see
       // patchOrderItemsUuidDuplicates above).
       await patchOrderItemsUuidDuplicates(db);
+      // Lone orphans keep a bogus uuid through the duplicate patch above
+      // (it only NULLs the second copy of a shared uuid) — NULL them too,
+      // or a later sale reusing the gap oid 2067s against them (see
+      // patchOrderItemsUuidOrphans above).
+      await patchOrderItemsUuidOrphans(db);
       // The sync pull upserts on uuid, so the local table needs it UNIQUE -
       // without this, replaying the same rows raises a constraint error and the
       // offline replica silently stops accepting them.
