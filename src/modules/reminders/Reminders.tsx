@@ -5,7 +5,7 @@ import { Page } from "../../components/Page";
 import { Modal } from "../../components/Modal";
 import { ReminderModal, ReminderDraft } from "../../components/ReminderModal";
 import { EmptyState } from "../../components/EmptyState";
-import { REMINDER_SELECT, REMINDER_KINDS, kindMeta, relativeDue, priorityColor, bucketOf, ReminderWithRefs } from "../../lib/reminders";
+import { REMINDER_SELECT, REMINDER_KINDS, actOnReminder, kindMeta, relativeDue, priorityColor, bucketOf, ReminderWithRefs } from "../../lib/reminders";
 import type { ReminderKind } from "../../lib/types";
 
 type Tab = "all" | "overdue" | "today" | "upcoming" | "done" | "dismissed";
@@ -31,16 +31,9 @@ export default function Reminders() {
   });
 
   async function act(id: number, mode: "done" | "dismissed") {
-    await dbExecute(
-      `WITH d AS (UPDATE reminders SET status=$2, completed_at=now(), updated_at=now() WHERE id=$1 RETURNING *)
-       INSERT INTO reminders (shop_id, kind, title, details, due_at, due_km, last_mileage,
-         customer_id, vehicle_id, vendor_id, order_id, priority, recurrence_days, created_by_user_id)
-       SELECT shop_id, kind, title, details, due_at + (recurrence_days || ' days')::interval,
-         due_km, last_mileage, customer_id, vehicle_id, vendor_id, order_id, priority,
-         recurrence_days, created_by_user_id
-       FROM d WHERE $2 = 'done' AND recurrence_days IS NOT NULL`,
-      [id, mode]
-    );
+    // Shared helper (lib/reminders.ts): the old single-statement form was
+    // Postgres-only (data-modifying CTE + ::interval) and died locally.
+    await actOnReminder(id, mode);
     qc.invalidateQueries({ queryKey: ["reminders"] });
     qc.invalidateQueries({ queryKey: ["reminder_counts"] });
   }

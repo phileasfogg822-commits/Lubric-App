@@ -1,4 +1,5 @@
 import type { Reminder } from "./types";
+import { dbSelect, dbExecute } from "./db";
 
 /**
  * Reminder / notification helpers shared by the dashboard panel, the sidebar
@@ -29,20 +30,64 @@ export interface ReminderWithRefs extends Reminder {
   about: string;
 }
 
-/** The one SQL snippet every list uses, so counts and rows always agree. */
+/** The one SQL snippet every list uses, so counts and rows always agree.
+ * The vehicle label is plain || concatenation, not Postgres'
+ * TRIM(BOTH FROM CONCAT_WS(...)): the Windows app died on it with
+ * 'near "FROM": syntax error' (reported 2026-11-25). || with COALESCE
+ * is valid on both engines; a NULL middle field leaves a double space
+ * inside the label, cosmetic only. Keep SQL comments out of this
+ * literal: the sim's sqlx-faithful binder does not model `--`
+ * comments, and an apostrophe inside one scrambles its quote tracking
+ * and misbinds the $N parameters. */
 export const REMINDER_SELECT = `
   SELECT r.*,
     c.name  AS customer_name,
     vd.name AS vendor_name,
-    NULLIF(TRIM(BOTH FROM CONCAT_WS(' ', v.make, v.model, v.registration)), '') AS vehicle_label,
+    NULLIF(TRIM(COALESCE(v.make, '') || ' ' || COALESCE(v.model, '') || ' ' || COALESCE(v.registration, '')), '') AS vehicle_label,
     COALESCE(c.name, vd.name,
-      NULLIF(TRIM(BOTH FROM CONCAT_WS(' ', v.make, v.model, v.registration)), ''),
+      NULLIF(TRIM(COALESCE(v.make, '') || ' ' || COALESCE(v.model, '') || ' ' || COALESCE(v.registration, '')), ''),
       'Shop') AS about
   FROM reminders r
   LEFT JOIN customers c  ON c.id  = r.customer_id
   LEFT JOIN vendors   vd ON vd.id = r.vendor_id
   LEFT JOIN vehicles  v  ON v.id  = r.vehicle_id
 `;
+
+/**
+ * Complete or dismiss a reminder, re-creating it when it recurs.
+ *
+ * One shared helper for the bell, the dashboard panel and the Reminders
+ * page (their three act() bodies were identical). The old form was a
+ * single Postgres statement — WITH d AS (UPDATE ... RETURNING *) INSERT
+ * INTO ... SELECT due_at + (recurrence_days || ' days')::interval ...
+ * — and SQLite supports neither a data-modifying CTE ('near "UPDATE":
+ * syntax error') nor ::interval, so completing a recurring reminder on
+ * the Windows app always failed. The steps below are each portable:
+ * the UPDATE, then a re-INSERT whose due date shifts by the recurrence
+ * (the ::interval there is translated by pgToSqlite locally and runs
+ * verbatim on Postgres). The pending-only guard makes a double tap
+ * idempotent: the second call finds the row already done and stops.
+ */
+export async function actOnReminder(id: number, mode: "done" | "dismissed"): Promise<void> {
+  const rows = await dbSelect<Reminder>("SELECT * FROM reminders WHERE id = $1", [id]);
+  const r = rows[0];
+  if (!r || r.status !== "pending") return;
+  await dbExecute(
+    "UPDATE reminders SET status=$2, completed_at=now(), updated_at=now() WHERE id=$1",
+    [id, mode]
+  );
+  if (mode === "done" && r.recurrence_days != null) {
+    await dbExecute(
+      `INSERT INTO reminders (shop_id, kind, title, details, due_at, due_km, last_mileage,
+         customer_id, vehicle_id, vendor_id, order_id, priority, recurrence_days, created_by_user_id)
+       SELECT shop_id, kind, title, details, due_at + (recurrence_days || ' days')::interval,
+         due_km, last_mileage, customer_id, vehicle_id, vendor_id, order_id, priority,
+         recurrence_days, created_by_user_id
+       FROM reminders WHERE id = $1`,
+      [id]
+    );
+  }
+}
 
 export type Bucket = "overdue" | "today" | "upcoming";
 

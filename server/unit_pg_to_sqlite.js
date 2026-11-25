@@ -36,6 +36,28 @@ check('existing translations still apply', () => {
   eq(pgToSqlite("SELECT date_trunc('day', created_at)"), "SELECT date(created_at)");
 });
 
+check('interval addition becomes datetime() with a day modifier', () => {
+  // The service reminder (POSCart.tsx) and the recurring-reminder
+  // re-insert (lib/reminders.ts) both write `<expr> + (<n> || ' days')
+  // ::interval`. SQLite has no interval type; the same shift is
+  // datetime(<expr>, '+' || <n> || ' days').
+  eq(
+    pgToSqlite("SELECT now() + (v.service_interval_days || ' days')::interval"),
+    "SELECT datetime(datetime('now'), '+' || v.service_interval_days || ' days')"
+  );
+  eq(
+    pgToSqlite("SELECT due_at + (recurrence_days || ' days')::interval"),
+    "SELECT datetime(due_at, '+' || recurrence_days || ' days')"
+  );
+});
+
+check('the interval-literal form is left alone (different construct)', () => {
+  eq(
+    pgToSqlite("SELECT now() + interval '7 days'"),
+    "SELECT datetime('now') + interval '7 days'"
+  );
+});
+
 check('plain SQL passes through untouched', () => {
   eq(
     pgToSqlite("SELECT id FROM vehicles WHERE customer_id = $1 ORDER BY id DESC LIMIT 1"),

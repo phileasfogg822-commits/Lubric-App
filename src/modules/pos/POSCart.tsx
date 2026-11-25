@@ -185,6 +185,12 @@ export async function completeSale(
   // Auto service reminder: when the bill includes a service and we know the
   // vehicle, schedule its next visit using the car's own interval (default
   // 60 days / 3,000 km). Deduped — no second pending reminder for the car.
+  // The title is plain || concatenation, not Postgres' TRIM(BOTH FROM
+  // CONCAT_WS(...)): the Windows app died on it with 'near "FROM": syntax
+  // error' (reported 2026-11-25) and the whole sale failed. Keep SQL
+  // comments out of this literal: the sim's sqlx-faithful binder does not
+  // model `--` comments, and an apostrophe inside one scrambles its
+  // quote tracking and misbinds the $N parameters.
   const hasService = cart.some((x) => x.kind === "service");
   if (hasService && vehicleId) {
     statements.push({
@@ -192,7 +198,7 @@ export async function completeSale(
               (shop_id, kind, title, details, due_at, due_km, last_mileage,
                customer_id, vehicle_id, order_id, created_by_user_id)
             SELECT 1, 'service_due',
-              'Service due: ' || NULLIF(TRIM(BOTH FROM CONCAT_WS(' ', v.make, v.model, v.registration)), '') || ' (' || c.name || ')',
+              'Service due: ' || NULLIF(TRIM(COALESCE(v.make, '') || ' ' || COALESCE(v.model, '') || ' ' || COALESCE(v.registration, '')), '') || ' (' || c.name || ')',
               'Next oil change / service for ' || c.name || ' — about ' || v.service_interval_km || ' km from the last visit.',
               now() + (v.service_interval_days || ' days')::interval,
               $2 + v.service_interval_km,

@@ -91,7 +91,7 @@ const SALE_STATEMENTS = [
               (shop_id, kind, title, details, due_at, due_km, last_mileage,
                customer_id, vehicle_id, order_id, created_by_user_id)
             SELECT 1, 'service_due',
-              'Service due: ' || NULLIF(TRIM(BOTH FROM CONCAT_WS(' ', v.make, v.model, v.registration)), '') || ' (' || c.name || ')',
+              'Service due: ' || NULLIF(TRIM(COALESCE(v.make, '') || ' ' || COALESCE(v.model, '') || ' ' || COALESCE(v.registration, '')), '') || ' (' || c.name || ')',
               'Next oil change / service for ' || c.name || ' — about ' || v.service_interval_km || ' km from the last visit.',
               now() + (v.service_interval_days || ' days')::interval,
               $2 + v.service_interval_km,

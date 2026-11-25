@@ -62,7 +62,7 @@ export function ReminderModal({ open, onClose, initial }: Props) {
     queryKey: ["reminder_vehicles", customerId],
     queryFn: () =>
       dbSelect<{ id: number; label: string }>(
-        `SELECT id, COALESCE(NULLIF(TRIM(BOTH FROM CONCAT_WS(' ', make, model, registration)), ''), 'Vehicle') AS label
+        `SELECT id, COALESCE(NULLIF(TRIM(COALESCE(make, '') || ' ' || COALESCE(model, '') || ' ' || COALESCE(registration, '')), ''), 'Vehicle') AS label
          FROM vehicles WHERE customer_id = $1 ORDER BY id DESC`,
         customerId ? [customerId] : []
       ),

@@ -147,6 +147,20 @@ export function pgToSqlite(sql: string): string {
     // is the same scalar maximum (NULL handling matches for our uses:
     // the first argument is the literal 0, the second a NOT NULL column).
     .replace(/\bGREATEST\s*\(\s*([^,()]+?)\s*,\s*([^()]+?)\s*\)/gi, "MAX($1, $2)")
+    // `<expr> + (<n> || ' days')::interval` — Postgres date arithmetic.
+    // SQLite has no interval type: the same shift is
+    // datetime(<expr>, '+' || <n> || ' days'). The service reminder
+    // (POSCart.tsx) and the recurring-reminder re-insert (lib/reminders.ts
+    // actOnReminder) both write it; without this rule a Windows sale with
+    // a service + vehicle died with "unrecognized token: ':'" right after
+    // the TRIM was fixed, and completing a recurring reminder died the
+    // same way. This rule runs BEFORE the NOW() rule below: `now() +
+    // (N || ' days')::interval` becomes datetime(now(), ...) first, and
+    // NOW() then becomes datetime('now') inside it — datetime() of a
+    // datetime string plus a modifier is valid SQLite. The `interval
+    // 'N days'` literal form (Dashboard payables) is a different
+    // construct and is NOT covered here.
+    .replace(/(\bnow\(\)|[A-Za-z_][\w.]*)\s*\+\s*\(([^()]+?)\s*\|\|\s*' days'\)::interval/gi, "datetime($1, '+' || $2 || ' days')")
     .replace(/\bNOW\(\s*\)/gi, "datetime('now')")
     // nextval(pg_get_serial_sequence('table', 'col')) — SQLite has no
     // sequences. The single-device local DB takes max(col)+1 instead.
@@ -485,8 +499,8 @@ const SYNC_COLUMN_PATCHES: { table: string; column: string; decl: string }[] = [
   { table: "services", column: "uuid", decl: "TEXT" },
   { table: "services", column: "updated_at", decl: "TEXT" },
   { table: "services", column: "deleted_at", decl: "TEXT" },
-  { table: "vehicles", column: "service_interval_days", decl: "INTEGER" },
-  { table: "vehicles", column: "service_interval_km", decl: "INTEGER" },
+  { table: "vehicles", column: "service_interval_days", decl: "INTEGER NOT NULL DEFAULT 60" },
+  { table: "vehicles", column: "service_interval_km", decl: "INTEGER NOT NULL DEFAULT 3000" },
   { table: "vehicles", column: "uuid", decl: "TEXT" },
   { table: "vehicles", column: "updated_at", decl: "TEXT" },
   { table: "vehicles", column: "deleted_at", decl: "TEXT" },
@@ -644,6 +658,26 @@ async function patchNegativeStock(db: { execute: (s: string) => Promise<unknown>
 }
 
 /**
+ * Repair vehicles whose service intervals are NULL.
+ *
+ * Server migration 011_reminders.sql adds these columns as NOT NULL
+ * DEFAULT 60 / 3000, but the local patch above used to add them as bare
+ * INTEGER — so a vehicle created by a Windows sale carried NULL
+ * intervals, and the auto service reminder it triggered was created
+ * with a NULL due date and NULL due km ("No date", never overdue),
+ * while the same sale on the VPS got 60 days / 3,000 km. The patch
+ * decl now matches the server; this backfill covers databases whose
+ * columns already exist from the old decl. Idempotent: a healthy
+ * database matches nothing. A vehicle whose interval was deliberately
+ * cleared is indistinguishable from one that never had it, and both
+ * get the shop default — that is the server's behaviour too.
+ */
+async function patchVehicleServiceIntervals(db: { execute: (s: string) => Promise<unknown> }): Promise<void> {
+  await db.execute(`UPDATE vehicles SET service_interval_days = 60 WHERE service_interval_days IS NULL`);
+  await db.execute(`UPDATE vehicles SET service_interval_km = 3000 WHERE service_interval_km IS NULL`);
+}
+
+/**
  * Repair phantom containers — the "1 extra leftover" (reported 2026-11-25).
  *
  * One sale makes one leftover per product, so two rows sharing a
@@ -733,6 +767,11 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       // and phantoms only — no real stock is touched.
       await patchNegativeStock(db);
       await patchDuplicateContainers(db);
+      // Vehicles created before the interval columns gained their
+      // server defaults (60 days / 3,000 km) carry NULL intervals, and
+      // the auto service reminder would be created dateless — see
+      // patchVehicleServiceIntervals above.
+      await patchVehicleServiceIntervals(db);
       // The sync pull upserts on uuid, so the local table needs it UNIQUE -
       // without this, replaying the same rows raises a constraint error and the
       // offline replica silently stops accepting them.
