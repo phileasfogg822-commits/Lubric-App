@@ -3,6 +3,8 @@
 
 use tauri::Manager;
 
+mod db_pool;
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_sql::Builder::default().build())
@@ -14,6 +16,13 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        // Batch 6 (2026-11-25): the sql plugin opens the database as a pool
+        // of up to ten connections, which splits a JS-driven BEGIN..COMMIT
+        // across them. use_single_connection_pool swaps that pool for one
+        // connection right after Database.load (see db_pool.rs); the
+        // frontend invokes it from getLocal(), and capabilities/default.json
+        // grants it to the main window.
+        .invoke_handler(tauri::generate_handler![db_pool::use_single_connection_pool])
         .setup(|_app| {
             // No startup work here: the frontend owns the local database —
             // getLocal() in src/lib/db.ts runs ensureLocalSchema (tables,

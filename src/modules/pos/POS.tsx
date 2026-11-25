@@ -138,9 +138,13 @@ export default function POS() {
         [cust.id]
       );
       // Repeat-visit count, which is what makes "make them a returning
-      // customer" worth offering rather than noise.
+      // customer" worth offering rather than noise. Plain COUNT(*): the
+      // Postgres `::int` cast is NOT stripped by pgToSqlite, so in local
+      // (SQLite) mode it threw "unrecognized token" and the catch below
+      // emptied the whole panel — a customer with ten transactions showed
+      // no history (reported 2026-11-25).
       const billCount = await dbSelect<any>(
-        "SELECT COUNT(*)::int AS n FROM orders WHERE customer_id = $1 AND status = 'completed'",
+        "SELECT COUNT(*) AS n FROM orders WHERE customer_id = $1 AND status = 'completed'",
         [cust.id]
       );
       // Recent product lines for the panel, newest first. NOT `DISTINCT ON`:
@@ -532,6 +536,9 @@ export default function POS() {
     if (submittingRef.current) return;
     submittingRef.current = true;
     tx.setBusy(true);
+    // The panel shows this customer's history; capture it before the sale,
+    // so the panel can be reloaded with the new sale in it afterwards.
+    const soldCustomer = customerHistory?.customer ?? null;
     try {
       const vh = vehicle.registration.trim() ? vehicle : null;
       const oid = await completeSale(cart, user?.id ?? 1, customerId, paymentAccountId, total, mileage, notes, vh);
@@ -539,6 +546,10 @@ export default function POS() {
       tx.showDone(`Order #${oid} completed`);
       handleClear();
       qc.invalidateQueries();
+      // The panel is local state, not a react-query cache: reload it, or
+      // the new sale never appears in the customer's history until they
+      // are picked again (reported 2026-11-25).
+      if (soldCustomer) loadHistory(soldCustomer);
     } catch (e: any) { setError(e.message || String(e)); }
     finally { tx.setBusy(false); submittingRef.current = false; }
   }

@@ -16,6 +16,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+# Batch 6 (2026-11-25): db_pool.rs swaps the sql plugin's pool for one
+# connection (SqlitePoolOptions) — needs sqlx directly, same 0.8 the plugin
+# already resolves (see Cargo.lock), so no version moves.
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
 tauri-plugin-single-instance = { version = "2" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

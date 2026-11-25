@@ -84,14 +84,52 @@ export async function getLocalDb(): Promise<any> {
 
 /** How long a local write waits for the database lock before failing (ms).
  *
- * rusqlite defaults to 0, so a sale transaction colliding with the sync
- * loop's writes failed instantly with SQLITE_BUSY (517) — reported
- * 2026-11-24. Five seconds covers a sale transaction and a sync pass; the
- * sync loop runs every 2 minutes and a sale takes far less than that. Set on
- * the connection before the schema DDL, so the schema work benefits too.
+ * The driver is sqlx-sqlite through @tauri-apps/plugin-sql, not rusqlite:
+ * the plugin opens the database as a pool, and the batch-4 timeout used to
+ * be set on only the ONE connection getLocal's load happened to use — the
+ * pool connections opened later kept the default and failed instantly with
+ * SQLITE_BUSY (517). After the batch-6 single-connection swap (see
+ * getLocal, and src-tauri/src/db_pool.rs) the loaded connection IS the
+ * only connection, so the timeout set here covers every local write. Five
+ * seconds covers a sale transaction and a sync pass; the sync loop runs
+ * every 2 minutes and a sale takes far less than that. Set on the
+ * connection before the schema DDL, so the schema work benefits too.
  * Runs through the unified handle's execute, so it covers both the Tauri
  * and the Capacitor drivers. */
 export const LOCAL_BUSY_TIMEOUT_MS = 5000;
+
+// ── local operation serialisation ────────────────────────────────────────
+// The local SQLite driver is @tauri-apps/plugin-sql (sqlx, NOT rusqlite):
+// it opens the database as a pool of up to ten connections and runs every
+// execute/select as a fresh acquire from it, with no transaction primitive
+// of its own. Two things follow, and this chain is the JS half of both:
+//
+//  1. Two transactions must never interleave: on the single-connection pool
+//     (see use_single_connection_pool, Rust) a second BEGIN landing while
+//     the first transaction is open is "cannot start a transaction within
+//     a transaction" — and on the plugin's own pool it splits the
+//     transaction across connections. Every local operation — reads,
+//     single writes, whole transactions — runs through this one FIFO chain,
+//     in the order it was called, so a transaction's BEGIN..COMMIT is never
+//     interrupted by another operation.
+//  2. The chain never breaks: a rejected operation still hands the next one
+//     a settled promise, so one failed sale cannot wedge every later
+//     database call behind it.
+//
+// The chain wraps the local path only (server mode is HTTP, one request at
+// a time already). Nothing inside a chained callback calls dbSelect /
+// dbExecute / dbTransaction again — they all use the raw connection
+// handle — so the chain cannot deadlock on itself.
+let localQueue: Promise<void> = Promise.resolve();
+/** Run `fn` after every earlier local operation has settled. */
+function runLocalSerialized<T>(fn: () => Promise<T>): Promise<T> {
+  const result = localQueue.then(fn);
+  localQueue = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
 
 let localConnPromise: Promise<any> | null = null;
 
@@ -115,6 +153,23 @@ async function getLocal(): Promise<any> {
           const mod: any = await import("@tauri-apps/plugin-sql");
           const load = mod.load ?? mod.default?.load;
           conn = await load("sqlite:lubric.db");
+          // Batch 6 (2026-11-25): the plugin opens the database as a pool
+          // of up to ten sqlx connections, and a BEGIN..COMMIT driven from
+          // JS can split across them — a failed sale then leaves its
+          // earlier writes committed (stock down, no order). Swap the pool
+          // for one connection, right after load and before any statement,
+          // so every statement of a transaction runs on the same
+          // connection (see src-tauri/src/db_pool.rs). Non-fatal by
+          // design: if the swap cannot run (a capability or plugin
+          // change), the app keeps working on the plugin's pool — the FIFO
+          // chain above still serialises operations — and the failure is
+          // loud in the console rather than a bricked till.
+          try {
+            const { invoke } = await import("@tauri-apps/api/core");
+            await invoke("use_single_connection_pool", { db: "sqlite:lubric.db" });
+          } catch (e) {
+            console.error("[lubric] single-connection pool swap failed — sales stay on the plugin pool:", e);
+          }
         }
         await conn.execute(`PRAGMA busy_timeout = ${LOCAL_BUSY_TIMEOUT_MS}`);
         await ensureLocalSchema(conn);
@@ -180,8 +235,10 @@ export function authHeaders(): Record<string, string> {
 
 export async function dbSelect<T>(sql: string, params: unknown[] = []): Promise<T[]> {
   if (await resolveMode() === "local") {
-    const db: any = await getLocal();
-    return db.select(pgToSqlite(sql), params) as Promise<T[]>;
+    return runLocalSerialized(async () => {
+      const db: any = await getLocal();
+      return db.select(pgToSqlite(sql), params) as Promise<T[]>;
+    });
   }
   const res = await fetch(`${apiBase()}/query`, {
     method: 'POST',
@@ -197,22 +254,24 @@ export async function dbSelect<T>(sql: string, params: unknown[] = []): Promise<
 
 export async function dbExecute(sql: string, params: unknown[] = []): Promise<{ rowCount: number; rows: unknown[] }> {
   if (await resolveMode() === "local") {
-    const db: any = await getLocal();
-    // A local INSERT into a replicated table needs a uuid, or the outbox
-    // trigger skips it and the row never syncs. Injected before the
-    // Postgres→SQLite translation; the appended ? is last, so positional
-    // params stay aligned on both the Tauri and Capacitor drivers.
-    const inj = injectUuid(sql, params, SYNC_TABLES);
-    const finalSql = inj ? inj.sql : sql;
-    const finalParams = inj ? inj.params : params;
-    // RETURNING rows are fetched via select(); the plugin's execute() only
-    // reports affected-row counts.
-    if (/\breturning\b/i.test(finalSql)) {
-      const rows = await db.select(pgToSqlite(finalSql), finalParams);
-      return { rowCount: rows.length, rows };
-    }
-    const r = await db.execute(pgToSqlite(finalSql), finalParams);
-    return { rowCount: r.rowsAffected ?? 0, rows: [] };
+    return runLocalSerialized(async () => {
+      const db: any = await getLocal();
+      // A local INSERT into a replicated table needs a uuid, or the outbox
+      // trigger skips it and the row never syncs. Injected before the
+      // Postgres→SQLite translation; the appended ? is last, so positional
+      // params stay aligned on both the Tauri and Capacitor drivers.
+      const inj = injectUuid(sql, params, SYNC_TABLES);
+      const finalSql = inj ? inj.sql : sql;
+      const finalParams = inj ? inj.params : params;
+      // RETURNING rows are fetched via select(); the plugin's execute() only
+      // reports affected-row counts.
+      if (/\breturning\b/i.test(finalSql)) {
+        const rows = await db.select(pgToSqlite(finalSql), finalParams);
+        return { rowCount: rows.length, rows };
+      }
+      const r = await db.execute(pgToSqlite(finalSql), finalParams);
+      return { rowCount: r.rowsAffected ?? 0, rows: [] };
+    });
   }
   const res = await fetch(`${apiBase()}/execute`, {
     method: 'POST',
@@ -236,29 +295,36 @@ export async function dbTransaction(
   statements: { sql: string; params?: unknown[] }[]
 ): Promise<{ rowCount: number; rows: any[] }[]> {
   if (await resolveMode() === "local") {
-    const db: any = await getLocal();
-    const results: { rowCount: number; rows: any[] }[] = [];
-    await db.execute("BEGIN");
-    try {
-      for (const st of statements) {
-        const p = st.params ?? [];
-        const inj = injectUuid(st.sql, p, SYNC_TABLES);
-        const s = inj ? inj.sql : st.sql;
-        const pp = inj ? inj.params : p;
-        if (/\breturning\b/i.test(s)) {
-          const rows = await db.select(pgToSqlite(s), pp);
-          results.push({ rowCount: rows.length, rows });
-        } else {
-          const r = await db.execute(pgToSqlite(s), pp);
-          results.push({ rowCount: r.rowsAffected ?? 0, rows: [] });
+    // The whole BEGIN..COMMIT holds the FIFO chain: no other local
+    // operation can land between its statements — on the single-connection
+    // pool that is what keeps the transaction on one connection, and
+    // without it a second BEGIN would be "cannot start a transaction
+    // within a transaction".
+    return runLocalSerialized(async () => {
+      const db: any = await getLocal();
+      const results: { rowCount: number; rows: any[] }[] = [];
+      await db.execute("BEGIN");
+      try {
+        for (const st of statements) {
+          const p = st.params ?? [];
+          const inj = injectUuid(st.sql, p, SYNC_TABLES);
+          const s = inj ? inj.sql : st.sql;
+          const pp = inj ? inj.params : p;
+          if (/\breturning\b/i.test(s)) {
+            const rows = await db.select(pgToSqlite(s), pp);
+            results.push({ rowCount: rows.length, rows });
+          } else {
+            const r = await db.execute(pgToSqlite(s), pp);
+            results.push({ rowCount: r.rowsAffected ?? 0, rows: [] });
+          }
         }
+        await db.execute("COMMIT");
+      } catch (e) {
+        try { await db.execute("ROLLBACK"); } catch { /* already rolled back */ }
+        throw e;
       }
-      await db.execute("COMMIT");
-    } catch (e) {
-      try { await db.execute("ROLLBACK"); } catch { /* already rolled back */ }
-      throw e;
-    }
-    return results;
+      return results;
+    });
   }
   const res = await fetch(`${apiBase()}/transaction`, {
     method: 'POST',

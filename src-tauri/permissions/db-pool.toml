@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-use-single-connection-pool"
+description = "Allow the use_single_connection_pool command, which replaces the sql plugin's pool with a single-connection pool so a sale is one real transaction"
+commands.allow = ["use_single_connection_pool"]
