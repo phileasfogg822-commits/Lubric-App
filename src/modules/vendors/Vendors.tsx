@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { dbSelect, dbExecute } from "../../lib/db";
+import { useAuth } from "../../lib/auth";
+import { logAction } from "../../lib/activityLog";
 import { Page } from "../../components/Page";
 import { Modal } from "../../components/Modal";
 import { FormField } from "../../components/FormField";
@@ -10,6 +12,7 @@ import { ReminderModal, ReminderDraft } from "../../components/ReminderModal";
 
 export default function Vendors() {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [show, setShow] = useState(false);
   const [editId, setEditId] = useState<number|null>(null);
   const [form, setForm] = useState({ name: "", contact: "", phone: "" });
@@ -34,7 +37,11 @@ export default function Vendors() {
       if (editId) await dbExecute("UPDATE vendors SET name=$1, contact=$2, phone=$3 WHERE id=$4", [form.name, form.contact, form.phone, editId]);
       else await dbExecute("INSERT INTO vendors (name, contact, phone, payable_balance) VALUES ($1, $2, $3, 0)", [form.name, form.contact, form.phone]);
     },
-    onSuccess: () => { qc.invalidateQueries(); setShow(false); },
+    onSuccess: () => {
+      qc.invalidateQueries();
+      setShow(false);
+      void logAction(user, editId ? "edit" : "add", "vendor", editId ?? null, form.name);
+    },
     onError: (e: any) => { alert("Error saving vendor: " + (e?.message || e)); console.error(e); },
   });
   return (

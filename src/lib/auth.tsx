@@ -11,6 +11,7 @@ import { invalidateConfigCache } from "./configFlags";
 // Passwords are never stored: the persisted user row carries no hash, and a
 // successful sign-in remembers only the email, for the login picker.
 import { rememberEmail, stripPasswordHash } from "./loginMemory";
+import { logAction } from "./activityLog";
 
 export interface User {
   id: number;
@@ -155,6 +156,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setActive(data.user.shop_id);
           setActiveShopId(data.user.shop_id);
         }
+        // Sign-ins are audited: the Activity page shows who signed in and
+        // when. Best-effort — logAction never throws, so a logging failure
+        // cannot fail the sign-in it was recording.
+        void logAction(stripPasswordHash<User>(data.user), "login", "user", data.user.id, `Signed in as ${data.user.email}`);
         return true;
       }
       return false;
@@ -204,6 +209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setOutlets([outlet]);
     setActive(outlet.shop_id);
     setActiveShopId(outlet.shop_id);
+    void logAction(stripPasswordHash(row), "login", "user", row.id, `Signed in as ${row.email}`);
     return true;
   }
 

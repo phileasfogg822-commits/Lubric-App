@@ -177,16 +177,20 @@ check('every dashboard query except payables passes for worker1', () => {
   );
 });
 
-check('the payables query really does need purchase.manage | reports', () => {
+check('the payables query really does need khata | purchase.manage | reports', () => {
   assert(!allowed(DUE_PAYABLES, WORKER1), 'payables query must be denied for worker1');
   assert(
     JSON.stringify(requiredPermissions(DUE_PAYABLES).sort()) ===
-      JSON.stringify(['purchase.manage', 'reports'].sort()),
-    'payables must need exactly purchase.manage | reports, got ' +
+      JSON.stringify(['khata', 'purchase.manage', 'reports'].sort()),
+    'payables must need exactly khata | purchase.manage | reports, got ' +
       JSON.stringify(requiredPermissions(DUE_PAYABLES))
   );
   assert(allowed(DUE_PAYABLES, ['purchase.manage']), 'a purchase manager must see payables');
   assert(allowed(DUE_PAYABLES, ['reports']), 'a reports holder must see payables');
+  // Batch 15: the khata page reads vendor payables too, so a khata holder
+  // must see them — that is why khata joined the set, and worker1 (no
+  // khata, no purchase.manage, no reports) is still denied.
+  assert(allowed(DUE_PAYABLES, ['khata']), 'a khata holder must see payables');
 });
 
 check('Dashboard gates the payables query on those keys and hides the card', () => {

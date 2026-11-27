@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { dbSelect } from "../../lib/db";
+import { useAuth } from "../../lib/auth";
+import { logAction } from "../../lib/activityLog";
 import { currency } from "../../lib/format";
 import { Modal } from "../../components/Modal";
 import { loadOrder, loadOrderItems, saveOrderEdits, leftoverLitresFor, type OrderRow, type EditLine } from "./editSale";
@@ -10,6 +12,7 @@ import type { Product, CustomerType } from "../../lib/types";
 interface Row extends EditLine { key: string; pack: number; capacity: number }
 
 export default function EditButton({ orderId, onDone }: { orderId: number; onDone: () => void }) {
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [order, setOrder] = useState<OrderRow | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
@@ -104,6 +107,7 @@ export default function EditButton({ orderId, onDone }: { orderId: number; onDon
       await saveOrderEdits(orderId, rows.map(({ key, pack, ...l }) => l as EditLine), { customerId, mileage, notes, paidAmount: paid });
       setOpen(false);
       onDone();
+      void logAction(user, "edit", "bill", orderId, `Order #${orderId} edited — new total ${total}`);
     } catch (e: any) { setErr(e.message || String(e)); } finally { setBusy(false); }
   }
 

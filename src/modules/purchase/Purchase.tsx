@@ -2,6 +2,8 @@ import { useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { dbSelect, dbGet, dbTransaction } from "../../lib/db";
+import { useAuth } from "../../lib/auth";
+import { logAction } from "../../lib/activityLog";
 import { Page } from "../../components/Page";
 import { FormField } from "../../components/FormField";
 import { EmptyState } from "../../components/EmptyState";
@@ -34,6 +36,7 @@ const money = (n: number) => Number(n || 0).toLocaleString();
 
 export default function Purchase() {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const [tab, setTab] = useState<"invoices" | "log">("invoices");
   const [showForm, setShowForm] = useState(false);
@@ -175,6 +178,7 @@ export default function Purchase() {
       // The ?vendor= preselect has served its purpose; clear it so the
       // next invoice starts clean.
       if (params.get("vendor")) setParams({}, { replace: true });
+      void logAction(user, "add", "purchase_invoice", oid, `Invoice #${oid} — ${total.toLocaleString()} received into stock`);
     },
     onError: (e: any) => {
       setFormError(e?.message || String(e));

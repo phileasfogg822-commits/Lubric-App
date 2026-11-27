@@ -26,12 +26,19 @@ const NAV: { to: string; label: string; icon: string; permission?: string; anyOf
   { to: "/catalog", label: "Stock", icon: "\u{1F4E6}", permission: "catalog.manage" },
   { to: "/customers", label: "Customers", icon: "\u{1F465}", permission: "customers" },
   { to: "/vendors", label: "Vendors", icon: "\u{1F3EA}", permission: "vendors" },
-  { to: "/ledger", label: "Khata", icon: "\u{1F4D8}", anyOf: ["customers", "vendors"] },
+  // The khata is its own module now, so it can be switched off per
+  // member from the Team page — it used to open on either party key.
+  { to: "/ledger", label: "Khata", icon: "\u{1F4D8}", permission: "khata" },
   { to: "/accounts", label: "Accounts", icon: "\u{1F4B3}", permission: "accounts" },
-  { to: "/expenses", label: "Expenses", icon: "\u{1F4B8}", permission: "expenses.manage" },
+  // Either key shows the entry: expenses.manage sees the records,
+  // expenses.add sees the form only — the page splits the rest.
+  { to: "/expenses", label: "Expenses", icon: "\u{1F4B8}", anyOf: ["expenses.manage", "expenses.add"] },
   { to: "/purchase", label: "Purchases", icon: "\u{1F69B}", permission: "purchase.manage" },
   { to: "/inspections", label: "Inspections", icon: "\u{1F50D}", permission: "inspections" },
   { to: "/team", label: "Team & Access", icon: "\u{1F464}", permission: "team.manage" },
+  // Admin-only: the log shows every member's actions, and only the
+  // admin account may read it — team.manage alone does not open it.
+  { to: "/activity", label: "Activity Log", icon: "\u{1F4CB}", adminOnly: true },
   { to: "/shop", label: "Shop Settings", icon: "\u2699", permission: "shop.manage" },
   // Owner-level screen: the API only lets admin/owner PATCH config, so gating
   // it on shop.manage would show non-admin managers a page that always 403s.

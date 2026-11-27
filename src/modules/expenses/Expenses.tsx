@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { dbSelect, dbTransaction } from "../../lib/db";
 import { currency } from "../../lib/format";
@@ -8,6 +8,7 @@ import { FormField } from "../../components/FormField";
 import { EmptyState } from "../../components/EmptyState";
 import { useAuth } from "../../lib/auth";
 import { PERMISSIONS } from "../../lib/permissions";
+import { logAction } from "../../lib/activityLog";
 import { TransactionDone, TransactionSpinner, useTransactionDone } from "../../components/TransactionDone";
 import { downloadCSV } from "../../lib/export";
 
@@ -67,6 +68,17 @@ export default function Expenses() {
   const qc = useQueryClient();
   const { hasPermission, activeShopId, user } = useAuth();
   const canManage = hasPermission(PERMISSIONS.EXPENSES_MANAGE);
+  // Add-only: a cashier records an expense from the counter but never
+  // sees the records list, edits one, or deletes one. The route opens
+  // on either key; the page below splits what each may see.
+  const canAdd = hasPermission(PERMISSIONS.EXPENSE_ADD);
+  // Opening the records is itself audited — but only when they render:
+  // an add-only member never sees them, so there is nothing to log.
+  useEffect(() => {
+    if (canManage) void logAction(user, "view", "expenses");
+    // Once per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // The outlet being worked in — the same value sent as X-Shop-Id, so it is
   // the shop the server's row security scopes this session to. Recording the
   // expense into it (instead of a hardcoded 1) is what makes the write and
@@ -91,6 +103,10 @@ export default function Expenses() {
 
   const { data: expenses, isLoading } = useQuery({
     queryKey: ["expenses", df, dt, catFilter],
+    // The records list is manage-only: an add-only member would 403 on
+    // this query (the server only serves expenses reads to manage /
+    // reports / dashboard), so it must not run for them at all.
+    enabled: canManage,
     queryFn: () => {
       const p: unknown[] = [];
       let w = "WHERE 1=1";
@@ -144,6 +160,9 @@ export default function Expenses() {
   }
 
   function openEdit(e: Expense) {
+    // Editing is a manage action: the button is hidden without the key,
+    // and this guard keeps a crafted call from opening the form either.
+    if (!canManage) return;
     setEditId(e.id);
     setForm({
       category: e.category || "Shop",
@@ -207,8 +226,12 @@ export default function Expenses() {
     },
     onSuccess: () => {
       qc.invalidateQueries();
+      // Capture the detail before close() resets the form.
+      const wasEdit = editId != null;
+      const detail = `${label(form.category, form.subcategory)} — ${form.amount}`;
       close();
-      tx.showDone(editId ? "Expense updated" : "Expense recorded");
+      tx.showDone(wasEdit ? "Expense updated" : "Expense recorded");
+      void logAction(user, wasEdit ? "edit" : "add", "expense", editId ?? null, detail);
     },
     onError: (e: unknown) =>
       alert("Could not save expense: " + (e instanceof Error ? e.message : String(e))),
@@ -225,7 +248,10 @@ export default function Expenses() {
         },
       ]);
     },
-    onSuccess: () => qc.invalidateQueries(),
+    onSuccess: (_data, e) => {
+      qc.invalidateQueries();
+      void logAction(user, "delete", "expense", e.id, `${e.category}${e.subcategory ? " / " + e.subcategory : ""} — ${e.amount}`);
+    },
     onError: (err: unknown) =>
       alert("Could not delete: " + (err instanceof Error ? err.message : String(err))),
   });
@@ -253,10 +279,12 @@ export default function Expenses() {
       subtitle="Shop, food, commute, salary and supplies — every entry also moves the account ledger"
       action={
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-ghost" onClick={exportCsv} disabled={!expenses?.length}>
-            Export CSV
-          </button>
           {canManage && (
+            <button className="btn btn-ghost" onClick={exportCsv} disabled={!expenses?.length}>
+              Export CSV
+            </button>
+          )}
+          {(canManage || canAdd) && (
             <button className="btn btn-primary" onClick={openAdd}>
               + Add Expense
             </button>
@@ -265,6 +293,13 @@ export default function Expenses() {
       }
     >
       <TransactionDone message={tx.done} />
+      {!canManage && (
+        <div className="card" style={{ padding: "12px 14px", marginBottom: 12, background: "#f8fafc" }}>
+          You can record expenses here. The expense records are only visible to the admin.
+        </div>
+      )}
+      {canManage && (
+      <>
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <input className="input" type="date" value={df} onChange={(e) => setDf(e.target.value)} title="From date" />
         <input className="input" type="date" value={dt} onChange={(e) => setDt(e.target.value)} title="To date" />
@@ -375,6 +410,8 @@ export default function Expenses() {
             );
           })}
         </div>
+      )}
+      </>
       )}
 
       {open && (

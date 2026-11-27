@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { dbSelect, dbExecute } from "../../lib/db";
 import { useAuth } from "../../lib/auth";
+import { can, PERMISSIONS } from "../../lib/permissions";
+import { logAction } from "../../lib/activityLog";
 import { currency } from "../../lib/format";
 import type { Product, CustomerType, CartItem } from "../../lib/types";
 import POSSearch, { type SearchResult } from "./POSSearch";
@@ -317,7 +319,9 @@ export default function POS() {
    */
   const promoteToReturning = useCallback(async () => {
     const c = customerHistory?.customer;
-    if (!c?.id) return;
+    // Changing the customer type is an edit: a member with only
+    // customers.add may add a customer, not rewrite one.
+    if (!c?.id || !can(user, PERMISSIONS.CUSTOMERS)) return;
     if (!confirm(
       `Make ${c.name} a returning customer?\n\n` +
       `Their default price becomes the returning-customer price instead of the ` +
@@ -331,10 +335,11 @@ export default function POS() {
       setCart((c2) => repriceAll(c2, "returning"));
       qc.invalidateQueries({ queryKey: ["customers"] });
       setSuccess(`${c.name} is now a returning customer.`);
+      void logAction(user, "edit", "customer", c.id, `${c.name} — marked returning`);
     } catch (e: any) {
       setError(`Could not change the customer type: ${e?.message ?? e}`);
     }
-  }, [customerHistory, qc]);
+  }, [customerHistory, qc, user]);
 
   // Find customer by the exact name typed (fallback when nothing is picked).
   const findCustomer = useCallback(async (name: string) => {
@@ -360,6 +365,33 @@ export default function POS() {
       console.error("Customer lookup failed:", e);
     }
   }, [loadHistory]);
+
+  // Add a customer straight from the till. The typed name is not on file
+  // yet — the button only shows then — and the member holds customers.add
+  // (the add-only key: they may add, but never open the customer list).
+  // The new customer is picked immediately, so pricing, history and the
+  // right-hand panel all follow exactly as if they had been typed in.
+  // No phone is recorded here: the header has no phone field, and the
+  // phone state may still hold a previous customer's number.
+  const addCustomerFromTill = useCallback(async () => {
+    const name = customerName.trim();
+    if (!name || customerId != null || !can(user, PERMISSIONS.CUSTOMER_ADD)) return;
+    try {
+      const r = await dbExecute(
+        "INSERT INTO customers (name, phone, customer_type, credit_balance) VALUES ($1, $2, 'returning', 0) RETURNING id",
+        [name, ""]
+      );
+      const id = (r.rows?.[0] as { id?: number } | undefined)?.id ?? null;
+      if (id) {
+        pickCustomer({ id, name, phone: "", customer_type: "returning", credit_balance: 0, last_visit_at: null });
+      }
+      setShowNameSuggest(false);
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      void logAction(user, "add", "customer", id, `${name} (from sale)`);
+    } catch (e: any) {
+      setError(`Could not add customer: ${e?.message ?? e}`);
+    }
+  }, [customerName, customerId, pickCustomer, qc, user]);
 
   // Debounced type-ahead over customer names / phone numbers.
   useEffect(() => {
@@ -633,6 +665,14 @@ export default function POS() {
             ))}
           </Suggestions>
         </div>
+        {/* New customer from the till: only when the typed name is not on
+            file yet, and only for a member with the add-only key. */}
+        {customerName.trim() && customerId == null && can(user, PERMISSIONS.CUSTOMER_ADD) && (
+          <button type="button" onClick={addCustomerFromTill}
+            style={{ padding: "4px 10px", fontSize: "0.75rem", fontWeight: 600, borderRadius: 4, cursor: "pointer", background: "#dcfce7", color: "#166534", border: "1px solid #86efac", whiteSpace: "nowrap" }}>
+            + New customer
+          </button>
+        )}
         <div style={{ display: "flex", gap: 2 }}>
           {([["walking","W"],["returning","R"],["wholesale","Wh"]] as [CustomerType,string][]).map(([tier,label]) => (
             <button key={tier} onClick={() => { setCustomerType(tier); setCart((c) => repriceAll(c, tier, priceCtx)); }} style={{ padding:"4px 10px", fontSize:"0.7rem", fontWeight:600, borderRadius:4, cursor:"pointer", background: customerType===tier ? "#cbd5e1" : "#f1f5f9", color: customerType===tier ? "#1e293b" : "#64748b", border: `1px solid ${customerType===tier ? "#94a3b8" : "#e2e8f0"}` }}>{label}</button>
@@ -846,6 +886,7 @@ export default function POS() {
                     after the named threshold of repeat bills, and it changes
                     which list price applies from now on - so never automatic. */}
                 {customerHistory.customer.customer_type === "walking" &&
+                  can(user, PERMISSIONS.CUSTOMERS) &&
                   (customerHistory.bills >= WALKING_PROMOTION_THRESHOLD || customerHistory.promoted) && (
                     <button type="button" onClick={promoteToReturning}
                       style={{ fontSize:"0.65rem", padding:"1px 7px", borderRadius:3, cursor:"pointer", background:"#ecfdf5", color:"#047857", border:"1px solid #a7f3d0" }}>

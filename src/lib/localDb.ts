@@ -425,6 +425,31 @@ CREATE INDEX IF NOT EXISTS idx_stock_levels_product ON stock_levels(product_id);
 `;
 
 /**
+ * Part 10: team activity log (batch 15, 2026-11-28).
+ *
+ * One row per action a team member takes — add / edit / delete / view /
+ * void / login — with the member's name denormalised into the row so the
+ * log stays readable if the member is later renamed or removed. Mirrors
+ * server/migrations/037_activity_log.sql. Deliberately NOT a sync table:
+ * the log is written where the action happened and read there; the
+ * Capacitor sync protocol (uuid / updated_at per row) does not cover it.
+ */
+export const LOCAL_SCHEMA_10 = `
+CREATE TABLE IF NOT EXISTS activity_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  shop_id    INTEGER DEFAULT 1,
+  user_id    INTEGER,
+  user_name  TEXT DEFAULT '',
+  action     TEXT NOT NULL,
+  entity     TEXT NOT NULL,
+  entity_id  INTEGER,
+  detail     TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_activity_log_created ON activity_log(shop_id, created_at DESC, id DESC);
+`;
+
+/**
  * Columns the sync layer needs that this schema predates: 012_sync added uuid,
  * shop_id and updated_at to every replicated table, but an existing local
  * database keeps the table it was created with — CREATE TABLE IF NOT EXISTS
@@ -779,6 +804,7 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       await db.execute(LOCAL_SCHEMA_7);
       await db.execute(LOCAL_SCHEMA_8);
       await db.execute(LOCAL_SCHEMA_9);
+      await db.execute(LOCAL_SCHEMA_10);
       await db.execute(LOCAL_SEED);
       // Columns first, then the index that depends on them.
       await patchSyncColumns(db);

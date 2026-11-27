@@ -129,22 +129,25 @@ check('negative control: Array.isArray on the stored value is false (old code fe
 
 // ── the gate, through the real parsePermissions ─────────────────────────────
 const perms = parsePermissions(cashier.permissions);
-check('parsePermissions turns the JSON string into the 4 cashier keys', () => {
-  assert(JSON.stringify(perms) === JSON.stringify(['customers', 'dashboard', 'pos.create', 'sales_history']),
+check('parsePermissions turns the JSON string into the 5 cashier keys', () => {
+  // Batch 15: the customer list key is gone from the cashier default —
+  // the cashier adds a customer from the till (customers.add) and records
+  // an expense (expenses.add) instead.
+  assert(JSON.stringify(perms) === JSON.stringify(['customers.add', 'dashboard', 'expenses.add', 'pos.create', 'sales_history']),
     'parsed: ' + JSON.stringify(perms));
 });
-check('cashier gate PASSES dashboard / pos.create / sales_history / customers', () => {
-  for (const k of ['dashboard', 'pos.create', 'sales_history', 'customers']) {
+check('cashier gate PASSES dashboard / pos.create / sales_history / customers.add / expenses.add', () => {
+  for (const k of ['dashboard', 'pos.create', 'sales_history', 'customers.add', 'expenses.add']) {
     assert(gate(perms, [k]), 'gate failed for ' + k);
   }
 });
-check('cashier gate FAILS vendors / team.manage / shop.manage', () => {
-  for (const k of ['vendors', 'team.manage', 'shop.manage']) {
+check('cashier gate FAILS customers / khata / vendors / team.manage / shop.manage', () => {
+  for (const k of ['customers', 'khata', 'vendors', 'team.manage', 'shop.manage']) {
     assert(!gate(perms, [k]), 'gate passed for ' + k);
   }
 });
 check('can() (the real module) agrees with the gate on every key', () => {
-  for (const k of ['dashboard', 'pos.create', 'sales_history', 'customers', 'vendors', 'team.manage', 'shop.manage']) {
+  for (const k of ['dashboard', 'pos.create', 'sales_history', 'customers', 'customers.add', 'expenses.add', 'khata', 'vendors', 'team.manage', 'shop.manage']) {
     assert(can(cashier, k) === gate(perms, [k]), 'can/gate disagree on ' + k);
   }
 });

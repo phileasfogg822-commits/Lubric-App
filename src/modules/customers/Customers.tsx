@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { dbSelect, dbExecute } from "../../lib/db";
+import { useAuth } from "../../lib/auth";
+import { can, PERMISSIONS } from "../../lib/permissions";
+import { logAction } from "../../lib/activityLog";
 import { Page } from "../../components/Page";
 import { Modal } from "../../components/Modal";
 import { FormField } from "../../components/FormField";
@@ -11,6 +14,19 @@ import { ReminderModal, ReminderDraft } from "../../components/ReminderModal";
 
 export default function Customers() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  // The route already requires `customers`, so everyone here may manage
+  // the list — the Edit button and the Khata link are gated again anyway,
+  // so a future loosening of the route cannot silently reopen them.
+  const canManage = can(user, PERMISSIONS.CUSTOMERS);
+  const canKhata = can(user, PERMISSIONS.KHATA);
+  // Opening the list is itself an audited action: the Activity page shows
+  // who looked at the customer records, and when.
+  useEffect(() => {
+    void logAction(user, "view", "customers");
+    // Once per mount — the member is already signed in when this renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [search, setSearch] = useState("");
   const [show, setShow] = useState(false);
   const [editId, setEditId] = useState<number|null>(null);
@@ -68,8 +84,13 @@ export default function Customers() {
           alert("Customer saved, but the vehicle could not be saved: " + (e?.message || e));
         }
       }
+      return customerId;
     },
-    onSuccess: () => { qc.invalidateQueries(); setShow(false); },
+    onSuccess: (id) => {
+      qc.invalidateQueries();
+      setShow(false);
+      void logAction(user, editId ? "edit" : "add", "customer", id ?? editId, form.name);
+    },
     onError: (e: any) => { alert("Error saving customer: " + (e?.message || e)); console.error(e); },
   });
   return (
@@ -101,9 +122,9 @@ export default function Customers() {
                   <td style={{ textAlign: "right", fontWeight: 600, color: Number(c.credit_balance) > 0 ? "#b91c1c" : "#64748b" }}>
                     {Number(c.credit_balance) > 0 ? Number(c.credit_balance).toLocaleString() : "—"}
                   </td>
-                  <td><Link className="btn btn-ghost btn-sm" to={`/ledger?id=${c.id}`}>Khata</Link></td>
+                  <td>{canKhata ? <Link className="btn btn-ghost btn-sm" to={`/ledger?id=${c.id}`}>Khata</Link> : null}</td>
                   <td><button className="btn btn-ghost btn-sm" onClick={() => openFollowUp(c)}>🔔 Follow-up</button></td>
-                  <td><button className="btn btn-ghost btn-sm" onClick={() => openEdit(c)}>Edit</button></td>
+                  <td>{canManage && <button className="btn btn-ghost btn-sm" onClick={() => openEdit(c)}>Edit</button>}</td>
                 </tr>
               ))}
             </tbody>

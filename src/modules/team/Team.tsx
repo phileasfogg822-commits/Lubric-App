@@ -11,6 +11,7 @@ import { d } from "../../lib/format";
 import { canManageDevices, countPhones, listDevices, type Device } from "../../lib/pairing";
 import {
   ACTION_PERMISSIONS,
+  ADD_PERMISSIONS,
   MODULE_PERMISSIONS,
   PERMISSIONS,
   getDefaultPermissions,
@@ -19,6 +20,7 @@ import {
   serializePermissions,
   type PermissionDef,
 } from "../../lib/permissions";
+import { logAction } from "../../lib/activityLog";
 
 interface Member {
   id: number;
@@ -173,6 +175,15 @@ export default function Team() {
     onSuccess: () => {
       qc.invalidateQueries();
       close();
+      // The member's own row id is unknown on add (no RETURNING carried
+      // through here), so the log names them in the detail instead.
+      void logAction(
+        user,
+        editId ? "edit" : "add",
+        "team_member",
+        editId ?? null,
+        `${form.full_name.trim()} (${form.email.trim()}, ${form.role}) — access ${editId ? "updated" : "created"}`
+      );
     },
     onError: (e: unknown) =>
       alert("Could not save member: " + (e instanceof Error ? e.message : String(e))),
@@ -365,6 +376,15 @@ export default function Team() {
               title="What they can do to bills"
               note="A cashier can create bills but cannot edit, void or delete them until you tick those here."
               defs={ACTION_PERMISSIONS}
+              selected={form.permissions}
+              onToggle={toggle}
+              onToggleAll={toggleGroup}
+            />
+
+            <PermissionGroup
+              title="What they can add without opening the page"
+              note="Add-only: they can record a new customer from the sale screen, or a new expense, without seeing the customer list or the expense records."
+              defs={ADD_PERMISSIONS}
               selected={form.permissions}
               onToggle={toggle}
               onToggleAll={toggleGroup}

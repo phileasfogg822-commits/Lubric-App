@@ -50,8 +50,11 @@ const P = {
   CATALOG_MANAGE: 'catalog.manage',
   CUSTOMERS: 'customers',
   VENDORS: 'vendors',
+  KHATA: 'khata',
   ACCOUNTS: 'accounts',
   EXPENSES_MANAGE: 'expenses.manage',
+  CUSTOMER_ADD: 'customers.add',
+  EXPENSE_ADD: 'expenses.add',
   PURCHASE_MANAGE: 'purchase.manage',
   INSPECTIONS: 'inspections',
   REPORTS: 'reports',
@@ -95,17 +98,19 @@ const READ_PERMISSIONS = {
   vehicles: [P.CUSTOMERS, P.POS_CREATE, P.SALES_HISTORY],
   // The khata. Same money as orders/payables, just itemised per person, so
   // anyone who may see the party may see the rows behind their balance.
-  party_ledger: [P.CUSTOMERS, P.VENDORS, P.POS_CREATE, P.SALES_HISTORY, P.ACCOUNTS, P.PURCHASE_MANAGE, P.REPORTS],
-  payable_allocations: [P.CUSTOMERS, P.VENDORS, P.POS_CREATE, P.SALES_HISTORY, P.ACCOUNTS, P.PURCHASE_MANAGE, P.REPORTS],
+  // The khata key itself opens it too: the page is gated on khata alone,
+  // and a khata holder must not 403 on the rows behind it.
+  party_ledger: [P.CUSTOMERS, P.VENDORS, P.KHATA, P.POS_CREATE, P.SALES_HISTORY, P.ACCOUNTS, P.PURCHASE_MANAGE, P.REPORTS],
+  payable_allocations: [P.CUSTOMERS, P.VENDORS, P.KHATA, P.POS_CREATE, P.SALES_HISTORY, P.ACCOUNTS, P.PURCHASE_MANAGE, P.REPORTS],
   commitments: [P.CUSTOMERS, P.VENDORS, P.SALES_HISTORY],
   commitment_items: [P.CUSTOMERS, P.VENDORS, P.SALES_HISTORY],
   vendors: [P.VENDORS, P.PURCHASE_MANAGE],
-  accounts: [P.ACCOUNTS, P.POS_CREATE, P.EXPENSES_MANAGE, P.DASHBOARD],
-  account_transactions: [P.ACCOUNTS, P.POS_CREATE, P.EXPENSES_MANAGE, P.DASHBOARD],
+  accounts: [P.ACCOUNTS, P.POS_CREATE, P.EXPENSES_MANAGE, P.EXPENSE_ADD, P.DASHBOARD],
+  account_transactions: [P.ACCOUNTS, P.POS_CREATE, P.EXPENSES_MANAGE, P.EXPENSE_ADD, P.DASHBOARD],
   expenses: [P.EXPENSES_MANAGE, P.REPORTS, P.DASHBOARD, P.PROFIT_LOSS],
   purchase_orders: [P.PURCHASE_MANAGE, P.REPORTS],
   purchase_order_items: [P.PURCHASE_MANAGE, P.REPORTS],
-  vendor_payables: [P.PURCHASE_MANAGE, P.REPORTS],
+  vendor_payables: [P.PURCHASE_MANAGE, P.REPORTS, P.KHATA],
   inspections: [P.INSPECTIONS, P.POS_CREATE],
   // Devices carry a long-lived token that can read and write the whole shop's
   // data over /v1. Handing one out is as sensitive as creating a user account,
@@ -142,19 +147,27 @@ const WRITE_PERMISSIONS = {
   used_oil_drum: [P.CATALOG_MANAGE, P.POS_CREATE],
   brands: [P.CATALOG_MANAGE],
   categories: [P.CATALOG_MANAGE],
+  // A cashier with customers.add may add a customer from the till, so the
+  // add key writes the table too — the list itself stays behind `customers`.
+  // See the statement split in requiredPermissions below: INSERT only.
   customers: [P.CUSTOMERS, P.POS_CREATE],
   vehicles: [P.CUSTOMERS, P.POS_CREATE],
   // Posting a khata row also moves the denormalised balance column the rest of
   // the app (and the phone) still reads, so the write keys mirror the parties:
   // customers for receivables, vendors for payables, plus the money keys for
-  // whoever is allowed to move the till.
-  party_ledger: [P.CUSTOMERS, P.VENDORS, P.ACCOUNTS, P.POS_CREATE, P.PURCHASE_MANAGE],
-  payable_allocations: [P.CUSTOMERS, P.VENDORS, P.ACCOUNTS, P.PURCHASE_MANAGE],
+  // whoever is allowed to move the till — and the khata key itself, so a
+  // khata holder can post without holding a party key as well.
+  party_ledger: [P.CUSTOMERS, P.VENDORS, P.KHATA, P.ACCOUNTS, P.POS_CREATE, P.PURCHASE_MANAGE],
+  payable_allocations: [P.CUSTOMERS, P.VENDORS, P.KHATA, P.ACCOUNTS, P.PURCHASE_MANAGE],
   commitments: [P.CUSTOMERS, P.VENDORS],
   commitment_items: [P.CUSTOMERS, P.VENDORS],
   vendors: [P.VENDORS],
-  accounts: [P.ACCOUNTS, P.POS_CREATE, P.EXPENSES_MANAGE],
-  account_transactions: [P.ACCOUNTS, P.POS_CREATE, P.EXPENSES_MANAGE],
+  // Recording an expense moves the till balance (UPDATE accounts) and
+  // writes the ledger row (INSERT account_transactions), so the add key
+  // must move those too — the same reason POS_CREATE is accepted here:
+  // the sale's till side-effects ride on the key that made the sale.
+  accounts: [P.ACCOUNTS, P.POS_CREATE, P.EXPENSES_MANAGE, P.EXPENSE_ADD],
+  account_transactions: [P.ACCOUNTS, P.POS_CREATE, P.EXPENSES_MANAGE, P.EXPENSE_ADD],
   expenses: [P.EXPENSES_MANAGE],
   purchase_orders: [P.PURCHASE_MANAGE],
   purchase_order_items: [P.PURCHASE_MANAGE],
@@ -203,6 +216,32 @@ function requiredPermissions(sql) {
     const m = trimmed.match(/^\s*(?:insert\s+into|update|delete\s+from|truncate\s+table?)\s+"?([a-z_][a-z0-9_]*)"?/);
     const target = (m && m[1]) || first;
 
+    if (target === 'activity_log') {
+      // The audit log is append-only for everyone: a cashier records
+      // their own actions, so INSERT needs no key at all. Anything else
+      // (UPDATE / DELETE — rewriting history) is admin-only, and the
+      // admin bypass in requirePermission runs before this is consulted,
+      // so '__admin__' is deliberately a key no member can hold.
+      if (/^insert/.test(trimmed)) return null;
+      return ['__admin__'];
+    }
+    if (target === 'expenses') {
+      // Add-only, enforced at the statement level: INSERT is the record
+      // going in, so the add key writes it — but UPDATE / DELETE stay
+      // manage-only, or "add without delete" would be a lie the API
+      // does not keep. Same shape as the orders carve-out above.
+      if (/^insert/.test(trimmed)) return [P.EXPENSES_MANAGE, P.EXPENSE_ADD];
+      return [P.EXPENSES_MANAGE];
+    }
+    if (target === 'customers' || target === 'vehicles') {
+      // Same split for the customer add key: INSERT only. An UPDATE
+      // (change the type, fix a name) or a DELETE stays with the
+      // customers key — and the till's own POS_CREATE, which already
+      // wrote this table for sales.
+      if (/^insert/.test(trimmed)) return [P.CUSTOMERS, P.POS_CREATE, P.CUSTOMER_ADD];
+      return [P.CUSTOMERS, P.POS_CREATE];
+    }
+
     if (target === 'orders') {
       if (/^delete/.test(trimmed)) return [P.BILL_DELETE];
       if (/^insert/.test(trimmed)) return [P.POS_CREATE];
@@ -240,9 +279,12 @@ function requiredPermissions(sql) {
   // ── reads ─────────────────────────────────────────────────────
   // Sensitive tables gate the whole statement wherever they appear.
   if (tables.has('users') || tables.has('role_permissions')) return [P.TEAM_MANAGE];
+  // The activity log is admin-only to read — same unholdable key as the
+  // write branch above; the admin bypass runs before this is consulted.
+  if (tables.has('activity_log')) return ['__admin__'];
   if (tables.has('expenses')) return [P.EXPENSES_MANAGE, P.REPORTS, P.DASHBOARD];
   if (tables.has('accounts') || tables.has('account_transactions')) {
-    return [P.ACCOUNTS, P.POS_CREATE, P.EXPENSES_MANAGE, P.DASHBOARD];
+    return [P.ACCOUNTS, P.POS_CREATE, P.EXPENSES_MANAGE, P.EXPENSE_ADD, P.DASHBOARD];
   }
   return (first && READ_PERMISSIONS[first]) || null;
 }

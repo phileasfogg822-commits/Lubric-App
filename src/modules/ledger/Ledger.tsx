@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { dbSelect } from "../../lib/db";
+import { useAuth } from "../../lib/auth";
+import { logAction } from "../../lib/activityLog";
 import { currency, d } from "../../lib/format";
 import { downloadCSV, printReport } from "../../lib/export";
 import { Page } from "../../components/Page";
@@ -43,6 +45,14 @@ import {
  */
 export default function Ledger() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  // Opening a khata is itself audited: the Activity page shows who
+  // looked at whose ledger, and when.
+  useEffect(() => {
+    void logAction(user, "view", "khata");
+    // Once per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // The party lives in the URL so the Customers and Vendors screens can deep
   // link straight into someone's statement (?type=vendor&id=3).
   const [params, setParams] = useSearchParams();
@@ -159,11 +169,20 @@ export default function Ledger() {
         });
       }
     },
-    onSuccess: () => {
+    onSuccess: (_data, input) => {
       setEntry(null);
       setError("");
       tx.showDone(entry === "payment" ? "Payment posted" : "Bill posted");
       invalidate();
+      // The posting already settled the balances; the log records who
+      // moved the money. `entry` is still the kind just posted here.
+      void logAction(
+        user,
+        "add",
+        "khata_entry",
+        party?.party_id ?? null,
+        `${partyType === "customer" ? "Customer" : "Vendor"} ${party?.name ?? ""} — ${entry === "payment" ? "payment" : "bill"} ${input.amount}`
+      );
     },
     onError: (e: any) => setError(e?.message || String(e)),
   });

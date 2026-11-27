@@ -10,6 +10,7 @@ import { voidOrder, deleteVoidedOrder } from "./editSale";
 import EditButton from "./EditButton";
 import { useAuth } from "../../lib/auth";
 import { PERMISSIONS } from "../../lib/permissions";
+import { logAction } from "../../lib/activityLog";
 
 type Kind = "all" | "sale" | "purchase" | "expense" | "field";
 type Party = "all" | "walking" | "returning" | "wholesale" | "vendor";
@@ -64,7 +65,7 @@ function dayOf(v: unknown) {
 
 export default function SalesHistory() {
   const qc = useQueryClient();
-  const { hasPermission, outlets, activeShopId } = useAuth();
+  const { hasPermission, outlets, activeShopId, user } = useAuth();
   const shopName = outlets.find((o) => o.shop_id === activeShopId)?.name ?? "My Shop";
 
   const canEdit = hasPermission(PERMISSIONS.BILL_EDIT);
@@ -493,6 +494,7 @@ export default function SalesHistory() {
                               try {
                                 await voidOrder(r.id);
                                 qc.invalidateQueries();
+                                void logAction(user, "void", "bill", r.id, `Order #${r.id} voided — stock and ledger reversed`);
                               } catch (e: any) {
                                 alert(e.message);
                               }
@@ -511,6 +513,7 @@ export default function SalesHistory() {
                               try {
                                 await deleteVoidedOrder(r.id);
                                 qc.invalidateQueries();
+                                void logAction(user, "delete", "bill", r.id, `Order #${r.id} permanently deleted`);
                               } catch (e: any) {
                                 alert(e.message);
                               }

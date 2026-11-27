@@ -19,6 +19,7 @@ export const PERMISSIONS = {
   CATALOG_MANAGE: "catalog.manage",
   CUSTOMERS: "customers",
   VENDORS: "vendors",
+  KHATA: "khata",
   ACCOUNTS: "accounts",
   EXPENSES_MANAGE: "expenses.manage",
   PURCHASE_MANAGE: "purchase.manage",
@@ -32,6 +33,13 @@ export const PERMISSIONS = {
   BILL_EDIT: "bill.edit",
   BILL_VOID: "bill.void",
   BILL_DELETE: "bill.delete",
+
+  // ── add-only actions ───────────────────────────────────────────
+  // A member who may ADD a record without opening the page that lists
+  // them: the cashier at the counter records a new customer or an expense
+  // but never sees the full list, edits it, or deletes from it.
+  CUSTOMER_ADD: "customers.add",
+  EXPENSE_ADD: "expenses.add",
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -50,6 +58,7 @@ export const MODULE_PERMISSIONS: PermissionDef[] = [
   { key: PERMISSIONS.CATALOG_MANAGE, label: "Stock", hint: "Products, services, containers, used oil" },
   { key: PERMISSIONS.CUSTOMERS, label: "Customers" },
   { key: PERMISSIONS.VENDORS, label: "Vendors" },
+  { key: PERMISSIONS.KHATA, label: "Khata", hint: "Customer & vendor ledgers" },
   { key: PERMISSIONS.ACCOUNTS, label: "Accounts" },
   { key: PERMISSIONS.EXPENSES_MANAGE, label: "Expenses", hint: "Add & manage expenses" },
   { key: PERMISSIONS.PURCHASE_MANAGE, label: "Purchases" },
@@ -67,7 +76,18 @@ export const ACTION_PERMISSIONS: PermissionDef[] = [
   { key: PERMISSIONS.BILL_DELETE, label: "Delete Bills", hint: "Permanently remove a voided bill" },
 ];
 
-export const ALL_PERMISSIONS: PermissionDef[] = [...MODULE_PERMISSIONS, ...ACTION_PERMISSIONS];
+/**
+ * Add-only actions — the record goes in, but the page that lists, edits
+ * and deletes it stays closed. Shown as their own group on the Team page
+ * so an admin can tick "may add a customer" without ticking "may open
+ * Customers". Not module keys: nothing routes on them.
+ */
+export const ADD_PERMISSIONS: PermissionDef[] = [
+  { key: PERMISSIONS.CUSTOMER_ADD, label: "Add Customers", hint: "Add a customer from the sale screen, without opening the customer list" },
+  { key: PERMISSIONS.EXPENSE_ADD, label: "Add Expenses", hint: "Record an expense without seeing the expense records" },
+];
+
+export const ALL_PERMISSIONS: PermissionDef[] = [...MODULE_PERMISSIONS, ...ADD_PERMISSIONS, ...ACTION_PERMISSIONS];
 
 /** Roles that bypass every permission check. */
 export const ADMIN_ROLES = ["admin", "owner"] as const;
@@ -133,38 +153,109 @@ export function getDefaultPermissions(role: string): string[] {
   }
 
   // Accountant: the money side — ledgers, accounts, expenses, purchases,
-  // reports and P&L — but no till, no team, and no bill changes.
+  // reports and P&L — but no till, no team, and no bill changes. The
+  // khata is theirs (they chase the money); the customer list stays
+  // open for them too, and customers.add rides along for the counter.
   if (r === "accountant") {
     return [
       PERMISSIONS.DASHBOARD,
       PERMISSIONS.SALES_HISTORY,
       PERMISSIONS.CUSTOMERS,
       PERMISSIONS.VENDORS,
+      PERMISSIONS.KHATA,
       PERMISSIONS.ACCOUNTS,
       PERMISSIONS.EXPENSES_MANAGE,
+      PERMISSIONS.CUSTOMER_ADD,
       PERMISSIONS.PURCHASE_MANAGE,
       PERMISSIONS.REPORTS,
       PERMISSIONS.PROFIT_LOSS,
     ];
   }
 
-  // Worker: counter work only — create bills, look them up, see customers
-  // and run inspections. No money pages, no team, no bill changes.
+  // Worker: counter work only — create bills, look them up, add a
+  // customer or an expense from the counter, and run inspections. No
+  // money pages, no team, no bill changes, and no customer/expense
+  // lists: the records themselves stay with the admin.
   if (r === "worker") {
     return [
       PERMISSIONS.DASHBOARD,
       PERMISSIONS.POS_CREATE,
       PERMISSIONS.SALES_HISTORY,
-      PERMISSIONS.CUSTOMERS,
+      PERMISSIONS.CUSTOMER_ADD,
+      PERMISSIONS.EXPENSE_ADD,
       PERMISSIONS.INSPECTIONS,
     ];
   }
 
-  // cashier (default)
+  // cashier (default) — counter work only: bills, the till, and adding a
+  // customer or an expense. The dashboard is on by default; an admin
+  // unticks it per member. No khata, no customer list, no expense
+  // records: those stay admin-only until explicitly granted.
   return [
     PERMISSIONS.DASHBOARD,
     PERMISSIONS.POS_CREATE,
     PERMISSIONS.SALES_HISTORY,
-    PERMISSIONS.CUSTOMERS,
+    PERMISSIONS.CUSTOMER_ADD,
+    PERMISSIONS.EXPENSE_ADD,
   ];
+}
+
+/**
+ * Where a signed-in user lands — and where a denied route bounces them.
+ *
+ * The old code hardcoded /dashboard everywhere (the `/` route, the `*`
+ * route, every RequirePermission denial, the post-login redirect). That
+ * is exactly how a cashier with the dashboard unticked still saw the
+ * dashboard: the sidebar hid the link, but every redirect landed them
+ * on the page itself, which had no gate of its own.
+ *
+ * The order below is the sidebar order. `enabled` is the deployment /
+ * feature-flag check (moduleEnabled + pickFlag); it defaults to "every
+ * module enabled" for the pure unit tests, and App.tsx passes the real
+ * one — a module the deployment does not include is never a landing
+ * spot, or a denied admin would bounce between two closed doors.
+ * /version is the last resort: it has no permission gate at all, so the
+ * landing can never loop back onto a page that denies the user again.
+ */
+export interface LandingCandidate {
+  to: string;
+  keys: string[];
+}
+
+export const LANDING_ROUTES: LandingCandidate[] = [
+  { to: "/dashboard", keys: [PERMISSIONS.DASHBOARD] },
+  { to: "/pos", keys: [PERMISSIONS.POS_CREATE] },
+  { to: "/sales", keys: [PERMISSIONS.SALES_HISTORY] },
+  { to: "/catalog", keys: [PERMISSIONS.CATALOG_MANAGE] },
+  { to: "/customers", keys: [PERMISSIONS.CUSTOMERS] },
+  { to: "/vendors", keys: [PERMISSIONS.VENDORS] },
+  { to: "/ledger", keys: [PERMISSIONS.KHATA] },
+  { to: "/accounts", keys: [PERMISSIONS.ACCOUNTS] },
+  { to: "/expenses", keys: [PERMISSIONS.EXPENSES_MANAGE, PERMISSIONS.EXPENSE_ADD] },
+  { to: "/purchase", keys: [PERMISSIONS.PURCHASE_MANAGE] },
+  { to: "/inspections", keys: [PERMISSIONS.INSPECTIONS] },
+  { to: "/reports", keys: [PERMISSIONS.REPORTS] },
+  { to: "/profit", keys: [PERMISSIONS.PROFIT_LOSS] },
+  { to: "/team", keys: [PERMISSIONS.TEAM_MANAGE] },
+  { to: "/shop", keys: [PERMISSIONS.SHOP_MANAGE] },
+];
+
+export function firstAllowedRoute(
+  user: { role?: string | null; permissions?: unknown } | null | undefined,
+  enabled: (key: string) => boolean = () => true
+): string {
+  if (!user) return "/login";
+  if (isAdminRole(user.role)) {
+    // Admins skip permission checks but not the deployment manifest: a
+    // white-label build without a module must not land on its page.
+    for (const c of LANDING_ROUTES) {
+      if (c.keys.some((k) => enabled(k))) return c.to;
+    }
+    return "/version";
+  }
+  const perms = parsePermissions(user.permissions);
+  for (const c of LANDING_ROUTES) {
+    if (c.keys.some((k) => perms.includes(k) && enabled(k))) return c.to;
+  }
+  return "/version";
 }

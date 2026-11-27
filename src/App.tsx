@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { useAuth, AuthProvider } from "./lib/auth";
-import { isAdminRole, parsePermissions } from "./lib/permissions";
+import { isAdminRole, parsePermissions, firstAllowedRoute } from "./lib/permissions";
 import { useConfigMap, useFlagRows, useBranding } from "./lib/useConfigFlags";
 import { isCapacitor, isTauri, getLocalDb, dbSelect } from "./lib/db";
 import { startSyncLoop } from "./lib/sync";
@@ -29,6 +29,7 @@ import Version from "./modules/settings/Version";
 import Inspections from "./modules/inspections/Inspections";
 import Purchase from "./modules/purchase/Purchase";
 import Team from "./modules/team/Team";
+import ActivityLog from "./modules/activity/ActivityLog";
 import Reminders from "./modules/reminders/Reminders";
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -71,7 +72,13 @@ function Branding() {
  * of their own pages.
  *
  * `permission` gates on a single key; `anyOf` on any one of several, for pages
- * that serve more than one module (the khata covers customers and vendors).
+ * that serve more than one module (expenses: the manage key or the add-only
+ * key both open the page; the page itself splits what each may see).
+ *
+ * A denial never points at /dashboard any more: a user without the
+ * dashboard key would bounce straight back onto a page that denies them
+ * again. It points at their first allowed page instead (see
+ * firstAllowedRoute in permissions.ts) — /version when they hold nothing.
  */
 function RequirePermission({
   permission,
@@ -86,12 +93,15 @@ function RequirePermission({
   const cfg = useConfigMap();
   const flags = useFlagRows();
   const needed = anyOf ?? (permission ? [permission] : []);
+  // The deployment / flag check, as a predicate the landing helper reuses:
+  // a denied user must land on a page their package actually includes.
+  const enabled = (k: string) => moduleEnabled(cfg["included_modules"], k) && pickFlag(flags, k);
   if (!user) return <Navigate to="/login" replace />;
   if (
     needed.length &&
-    !needed.some((k) => moduleEnabled(cfg["included_modules"], k) && pickFlag(flags, k))
+    !needed.some((k) => enabled(k))
   ) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={firstAllowedRoute(user, enabled)} replace />;
   }
   if (isAdminRole(user.role)) return <>{children}</>;
   // users.permissions is a TEXT column holding a JSON string, so the raw
@@ -99,15 +109,43 @@ function RequirePermission({
   // a non-admin back to /dashboard (the old Array.isArray check failed).
   const perms = parsePermissions(user.permissions);
   if (!needed.some((k) => perms.includes(k))) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={firstAllowedRoute(user, enabled)} replace />;
   }
   return <>{children}</>;
 }
 
+/**
+ * Admin-only gate. team.manage is NOT enough: the activity log shows
+ * every member's actions, and Umar wants it visible to the admin account
+ * only. A non-admin lands on their first allowed page, never on a page
+ * that would deny them again.
+ */
+function RequireAdmin({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const cfg = useConfigMap();
+  const flags = useFlagRows();
+  const enabled = (k: string) => moduleEnabled(cfg["included_modules"], k) && pickFlag(flags, k);
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isAdminRole(user.role)) return <Navigate to={firstAllowedRoute(user, enabled)} replace />;
+  return <>{children}</>;
+}
+
+/** `/` and `*`: land on the first page this user may actually open. */
+function LandingRedirect() {
+  const { user } = useAuth();
+  const cfg = useConfigMap();
+  const flags = useFlagRows();
+  const enabled = (k: string) => moduleEnabled(cfg["included_modules"], k) && pickFlag(flags, k);
+  return <Navigate to={firstAllowedRoute(user, enabled)} replace />;
+}
+
 function RedirectIfAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
+  const cfg = useConfigMap();
+  const flags = useFlagRows();
+  const enabled = (k: string) => moduleEnabled(cfg["included_modules"], k) && pickFlag(flags, k);
   if (loading) return <div style={{ padding: 32, textAlign: "center" }}>Loading...</div>;
-  if (user) return <Navigate to="/dashboard" replace />;
+  if (user) return <Navigate to={firstAllowedRoute(user, enabled)} replace />;
   return <>{children}</>;
 }
 
@@ -174,26 +212,35 @@ export default function App() {
           <Route path="/setup" element={<FirstRunSetup />} />
 
           <Route element={<RequireAuth><Layout /></RequireAuth>}>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/" element={<LandingRedirect />} />
 
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/reminders" element={<Reminders />} />
+            {/* The dashboard used to sit outside any gate, so unticking it
+                for a member hid the sidebar link but left the page itself
+                open — every redirect in the app landed them on it. It is
+                gated like every other module now. */}
+            <Route path="/dashboard" element={<RequirePermission permission="dashboard"><Dashboard /></RequirePermission>} />
+            <Route path="/reminders" element={<RequirePermission permission="dashboard"><Reminders /></RequirePermission>} />
             <Route path="/pos" element={<RequirePermission permission="pos.create"><POS /></RequirePermission>} />
             <Route path="/sales" element={<RequirePermission permission="sales_history"><SalesHistory /></RequirePermission>} />
         <Route path="/field" element={<RequirePermission permission="dashboard"><FieldActivity /></RequirePermission>} />
             <Route path="/catalog" element={<RequirePermission permission="catalog.manage"><Catalog /></RequirePermission>} />
             <Route path="/customers" element={<RequirePermission permission="customers"><Customers /></RequirePermission>} />
             <Route path="/vendors" element={<RequirePermission permission="vendors"><Vendors /></RequirePermission>} />
-            {/* The khata is per-person: a customer statement and a supplier
-                statement are the same screen, so either party's key opens it. */}
-            <Route path="/ledger" element={<RequirePermission anyOf={["customers", "vendors"]}><Ledger /></RequirePermission>} />
+            {/* The khata is its own module now: it used to open on either
+                party key, so it could never be switched off per member. */}
+            <Route path="/ledger" element={<RequirePermission permission="khata"><Ledger /></RequirePermission>} />
             <Route path="/accounts" element={<RequirePermission permission="accounts"><Accounts /></RequirePermission>} />
-            <Route path="/expenses" element={<RequirePermission permission="expenses.manage"><Expenses /></RequirePermission>} />
+            {/* Either key opens the page: expenses.manage sees everything,
+                expenses.add sees the form only — the page splits the rest. */}
+            <Route path="/expenses" element={<RequirePermission anyOf={["expenses.manage", "expenses.add"]}><Expenses /></RequirePermission>} />
             <Route path="/reports" element={<RequirePermission permission="reports"><Reports /></RequirePermission>} />
             <Route path="/profit" element={<RequirePermission permission="profit_loss"><ProfitLoss /></RequirePermission>} />
             <Route path="/purchase" element={<RequirePermission permission="purchase.manage"><Purchase /></RequirePermission>} />
             <Route path="/inspections" element={<RequirePermission permission="inspections"><Inspections /></RequirePermission>} />
             <Route path="/team" element={<RequirePermission permission="team.manage"><Team /></RequirePermission>} />
+            {/* Admin-only: team.manage is not enough — the log shows every
+                member's actions, and only the admin account may read it. */}
+            <Route path="/activity" element={<RequireAdmin><ActivityLog /></RequireAdmin>} />
             <Route path="/shop" element={<RequirePermission permission="shop.manage"><Shop /></RequirePermission>} />
             {/* White-label admin: branding, module manifest, feature flags.
                 Gated like shop settings; PATCHes are admin/owner on the API. */}
@@ -212,7 +259,7 @@ export default function App() {
             <Route path="/used-oil" element={<Navigate to="/catalog" replace />} />
             <Route path="/vehicles" element={<Navigate to="/customers" replace />} />
 
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            <Route path="*" element={<LandingRedirect />} />
           </Route>
         </Routes>
       </ErrorBoundary>

@@ -146,10 +146,12 @@ check('accountant preset has the money pages, no till, no team, no bill changes'
 });
 check('worker preset is counter work only', () => {
   const p = getDefaultPermissions('worker');
-  for (const k of ['dashboard', 'pos.create', 'sales_history', 'customers', 'inspections']) {
+  // Batch 15: the worker adds a customer from the till (customers.add)
+  // but does not open the customer list (customers) and has no khata.
+  for (const k of ['dashboard', 'pos.create', 'sales_history', 'customers.add', 'expenses.add', 'inspections']) {
     assert(p.includes(k), 'worker missing ' + k);
   }
-  for (const k of ['accounts', 'reports', 'profit_loss', 'team.manage', 'bill.delete']) {
+  for (const k of ['customers', 'khata', 'accounts', 'reports', 'profit_loss', 'team.manage', 'bill.delete']) {
     assert(!p.includes(k), 'worker must not have ' + k);
   }
 });
