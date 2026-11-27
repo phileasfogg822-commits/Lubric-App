@@ -39,8 +39,8 @@ CREATE TABLE IF NOT EXISTS order_items (id INTEGER PRIMARY KEY AUTOINCREMENT, or
 CREATE TABLE IF NOT EXISTS used_oil_drum (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, current_litres REAL DEFAULT 0, capacity REAL DEFAULT 200);
 CREATE TABLE IF NOT EXISTS used_oil_log (id INTEGER PRIMARY KEY AUTOINCREMENT, drum_id INTEGER NOT NULL, litres REAL NOT NULL, type TEXT DEFAULT 'added', source_order_id INTEGER, notes TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, category TEXT NOT NULL, subcategory TEXT DEFAULT '', amount REAL DEFAULT 0, account_id INTEGER, date TEXT, note TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')));
-CREATE TABLE IF NOT EXISTS purchase_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, vendor_id INTEGER, total REAL DEFAULT 0, paid REAL DEFAULT 0, status TEXT DEFAULT 'completed', notes TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')));
-CREATE TABLE IF NOT EXISTS purchase_order_items (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, product_name TEXT DEFAULT '', qty REAL DEFAULT 0, unit_cost REAL DEFAULT 0, line_total REAL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS purchase_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, vendor_id INTEGER, total REAL DEFAULT 0, paid REAL DEFAULT 0, status TEXT DEFAULT 'received', notes TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS purchase_order_items (id INTEGER PRIMARY KEY AUTOINCREMENT, purchase_order_id INTEGER NOT NULL, product_id INTEGER NOT NULL, qty REAL DEFAULT 0, cost_price REAL DEFAULT 0, line_total REAL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS reminders (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, kind TEXT DEFAULT 'todo', title TEXT NOT NULL, details TEXT DEFAULT '', due_at TEXT, due_km INTEGER, last_mileage INTEGER, customer_id INTEGER, vehicle_id INTEGER, vendor_id INTEGER, order_id INTEGER, priority TEXT DEFAULT 'normal', recurrence_days INTEGER, status TEXT DEFAULT 'pending', completed_at TEXT, created_by_user_id INTEGER, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT);
 CREATE TABLE IF NOT EXISTS inspections (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id INTEGER DEFAULT 1, customer_id INTEGER, vehicle_id INTEGER, data TEXT DEFAULT '', notes TEXT DEFAULT '', user_id INTEGER, created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
@@ -565,6 +565,43 @@ async function patchStockLevelsUnique(db: { execute: (s: string) => Promise<unkn
 }
 
 /**
+ * Give an EXISTING local database the server-shaped purchase_order_items.
+ *
+ * The local table used to say order_id / product_name / unit_cost while
+ * the server (001_init.sql) says purchase_order_id / product_id /
+ * cost_price — the Purchase screen was a placeholder, so no code ever
+ * wrote the local shape, but a database created before this fix keeps
+ * the table it was created with. Rename the two columns, add product_id
+ * (resolved from the stored name where the product exists), then drop
+ * the name column — the name now comes from the products join. A
+ * database with no old columns, or a fresh install, matches nothing and
+ * this is a no-op. Idempotent: a second launch sees the new shape and
+ * returns before touching anything.
+ */
+async function patchPurchaseOrderItemsSchema(db: { select: (s: string) => Promise<unknown>; execute: (s: string) => Promise<unknown> }): Promise<void> {
+  const cols = (await db.select(`PRAGMA table_info(purchase_order_items)`)) as { name: string }[] | null;
+  if (!Array.isArray(cols) || cols.length === 0) return; // table absent
+  const names = cols.map((c) => c.name);
+  if (names.includes("purchase_order_id") && names.includes("product_id") && names.includes("cost_price")) return;
+  if (names.includes("order_id")) {
+    await db.execute(`ALTER TABLE purchase_order_items RENAME COLUMN order_id TO purchase_order_id`);
+  }
+  if (names.includes("unit_cost")) {
+    await db.execute(`ALTER TABLE purchase_order_items RENAME COLUMN unit_cost TO cost_price`);
+  }
+  if (!names.includes("product_id")) {
+    await db.execute(`ALTER TABLE purchase_order_items ADD COLUMN product_id INTEGER NOT NULL DEFAULT 0`);
+    // Resolve from the stored name where the product exists; a row whose
+    // name matches nothing keeps 0 (the subquery would write NULL, and
+    // the column is NOT NULL) rather than failing the whole upgrade.
+    await db.execute(`UPDATE purchase_order_items SET product_id = (SELECT p.id FROM products p WHERE LOWER(p.name) = LOWER(purchase_order_items.product_name) LIMIT 1) WHERE product_id = 0 AND product_name IS NOT NULL AND product_name <> '' AND EXISTS (SELECT 1 FROM products p WHERE LOWER(p.name) = LOWER(purchase_order_items.product_name))`);
+  }
+  if (names.includes("product_name")) {
+    await db.execute(`ALTER TABLE purchase_order_items DROP COLUMN product_name`);
+  }
+}
+
+/**
  * Give every outlet a default warehouse — fresh installs and upgrades alike.
  *
  * The sale's stock statements fall back to the outlet's default warehouse
@@ -745,6 +782,10 @@ export function ensureLocalSchema(db: { execute: (s: string) => Promise<unknown>
       await db.execute(LOCAL_SEED);
       // Columns first, then the index that depends on them.
       await patchSyncColumns(db);
+      // The purchase lines table used to carry the server's column names
+      // the other way round (order_id / product_name / unit_cost) — rename
+      // it to the server shape before anything reads it.
+      await patchPurchaseOrderItemsSchema(db);
       // The sale's stock_levels upsert needs (warehouse_id, product_id)
       // unique on databases created before the CREATE TABLE gained it.
       await patchStockLevelsUnique(db);

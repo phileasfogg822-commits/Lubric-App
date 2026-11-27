@@ -55,6 +55,7 @@ export default function Vendors() {
                 <div style={{ fontSize: "0.8rem", color: "#64748b" }}>{v.contact} {v.phone ? `· ${v.phone}` : ""}</div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Link className="btn btn-ghost btn-sm" to={`/purchase?vendor=${v.id}`}>+ Invoice</Link>
                 <Link className="btn btn-ghost btn-sm" to={`/ledger?type=vendor&id=${v.id}`}>Khata</Link>
                 <button className="btn btn-ghost btn-sm" onClick={() => scheduleMeeting(v)}>🗓 Meet</button>
                 <button className="btn btn-ghost btn-sm" onClick={() => openEdit(v)}>Edit</button>

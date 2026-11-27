@@ -66,6 +66,8 @@ jobs:
           node --experimental-strip-types server/sim_sale_service_reminder.js
           node --experimental-strip-types server/sim_sale_payment_options.js
           node --experimental-strip-types server/sim_leftover_container_pricing.js
+          node --experimental-strip-types server/sim_purchase_invoice_stock_in.js
+          node --experimental-strip-types server/sim_purchase_items_schema_upgrade.js
         shell: pwsh
 
       # tsc + vite build for the web bundle (PWA stays on here — the Tauri

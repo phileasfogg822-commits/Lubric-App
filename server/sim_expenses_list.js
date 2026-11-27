@@ -303,8 +303,14 @@ check('ADD: the period total now sums both rows', () => {
   assert(Object.values(totals).reduce((s, v) => s + v, 0) === 5150, 'the period total must be 5150');
 });
 check('FILTER: the from/to date filter hides out-of-range rows', () => {
-  assert(listExpenses(h, { df: '2026-11-26' }).length === 0, 'from 2026-11-26 must hide both rows');
-  assert(listExpenses(h, { df: '2026-11-25', dt: '2026-11-25' }).length === 2, 'the 2026-11-25 window must keep both rows');
+  // The Tea row has a blank date, so its day falls back to TODAY — the
+  // filter bounds must be computed from TODAY, not hardcoded: on
+  // 2026-11-25 (when this sim was written) TODAY was 2026-11-25 and
+  // '2026-11-26' hid both rows, but any later day broke it (the run on
+  // 2026-11-27 failed 20/21 on this check alone, with no code change).
+  const tomorrow = new Date(Date.parse(TODAY) + 86400000).toISOString().slice(0, 10);
+  assert(listExpenses(h, { df: tomorrow }).length === 0, 'from tomorrow must hide both rows');
+  assert(listExpenses(h, { df: '2026-11-25', dt: TODAY }).length === 2, 'the 2026-11-25..today window must keep both rows');
 });
 check('FILTER: the category filter shows one category only', () => {
   const rows = listExpenses(h, { cat: 'Food' });

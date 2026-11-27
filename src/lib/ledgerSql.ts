@@ -309,6 +309,15 @@ export interface BillInput {
    * order would appear as two different bills in the Khata.
    */
   orderId?: number | null;
+  /**
+   * Vendor only: the vendor_payables id this bill opens, reserved by the
+   * caller (nextval) so a payment posted in the SAME transaction can
+   * settle it — the purchase invoice does this, because its paid-now
+   * payment settles the payable the invoice itself just opened. Without
+   * it the bill keeps the old shape: insert the payable, then link the
+   * ledger row to the newest payable for the vendor.
+   */
+  payableId?: number | null;
 }
 
 /**
@@ -324,28 +333,49 @@ export function billStatements(i: BillInput): Statement[] {
   if (i.partyType === "vendor") {
     // A purchase on account is also an open payable: Reports and the vendor
     // screen read vendor_payables, and a later payment settles it FIFO.
-    stmts.push({
-      sql: `INSERT INTO vendor_payables (vendor_id, amount, due_date, status)
-            VALUES ($1, $2, $3, 'pending')`,
-      params: [i.partyId, amount, i.dueDate ?? null],
-    });
+    // With an explicit id (the purchase invoice reserves it so its own
+    // payment can settle this row in the same transaction) the insert
+    // carries the id; otherwise the id is the sequence's, as before.
+    if (i.payableId != null) {
+      stmts.push({
+        sql: `INSERT INTO vendor_payables (id, vendor_id, amount, due_date, status)
+              VALUES ($1, $2, $3, $4, 'pending')`,
+        params: [i.payableId, i.partyId, amount, i.dueDate ?? null],
+      });
+    } else {
+      stmts.push({
+        sql: `INSERT INTO vendor_payables (vendor_id, amount, due_date, status)
+              VALUES ($1, $2, $3, 'pending')`,
+        params: [i.partyId, amount, i.dueDate ?? null],
+      });
+    }
   }
 
   // The vendor branch links the payable inserted just above. Inside one
   // transaction the newest id for that vendor is the row we wrote, and a plain
   // scalar subquery keeps this portable across both dialects (a RETURNING id
   // would not be readable from the statements that follow it in the batch).
+  // With an explicit payable id the link is the id itself — no subquery, and
+  // no chance of catching a different row.
   stmts.push(
     i.partyType === "vendor"
-      ? {
-          sql: `INSERT INTO party_ledger
-                  (uuid, shop_id, party_type, party_id, kind, direction, amount,
-                   vendor_payable_id, note, occurred_at, origin)
-                VALUES ($1, 1, $2, $3, 'bill', 'debit', $4,
-                        (SELECT id FROM vendor_payables WHERE vendor_id = $3 ORDER BY id DESC LIMIT 1),
-                        $5, $6, 'shop')`,
-          params: [i.uuid, i.partyType, i.partyId, amount, note, i.occurredAt],
-        }
+      ? i.payableId != null
+        ? {
+            sql: `INSERT INTO party_ledger
+                    (uuid, shop_id, party_type, party_id, kind, direction, amount,
+                     vendor_payable_id, note, occurred_at, origin)
+                  VALUES ($1, 1, $2, $3, 'bill', 'debit', $4, $5, $6, $7, 'shop')`,
+            params: [i.uuid, i.partyType, i.partyId, amount, i.payableId, note, i.occurredAt],
+          }
+        : {
+            sql: `INSERT INTO party_ledger
+                    (uuid, shop_id, party_type, party_id, kind, direction, amount,
+                     vendor_payable_id, note, occurred_at, origin)
+                  VALUES ($1, 1, $2, $3, 'bill', 'debit', $4,
+                          (SELECT id FROM vendor_payables WHERE vendor_id = $3 ORDER BY id DESC LIMIT 1),
+                          $5, $6, 'shop')`,
+            params: [i.uuid, i.partyType, i.partyId, amount, note, i.occurredAt],
+          }
       : {
           sql: `INSERT INTO party_ledger
                   (uuid, shop_id, party_type, party_id, kind, direction, amount, note, occurred_at, origin, order_id)

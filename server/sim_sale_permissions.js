@@ -11,7 +11,11 @@
  *
  * The fix, in server/index.js requiredPermissions / WRITE_PERMISSIONS:
  *  - a products UPDATE that assigns ONLY stock_qty accepts pos.create;
- *    every other products write stays catalog-only.
+ *    every other products write stays catalog-only. Batch 14 extends
+ *    the same carve-out to purchase.manage: a vendor invoice moves the
+ *    stock cache through the same stockIn statements, and the invoice
+ *    is purchase.manage's own feature — without this its stock-in 403s
+ *    for the very role meant to receive shipments.
  *  - containers, container_splits, used_oil_log, used_oil_drum writes accept
  *    pos.create or catalog.manage (sale side-effect tables).
  *  - stock_movements / stock_levels stay UNMAPPED (allowed): mapping them
@@ -139,8 +143,8 @@ check('the stock_qty-only products UPDATE is what opens the sale', () => {
   assert(allowed(bump, WORKER1), 'stock_qty bump denied for worker1');
   assert(
     JSON.stringify(requiredPermissions(bump).sort()) ===
-      JSON.stringify(['catalog.manage', 'pos.create'].sort()),
-    'bump must accept exactly pos.create | catalog.manage, got ' +
+      JSON.stringify(['catalog.manage', 'pos.create', 'purchase.manage'].sort()),
+    'bump must accept exactly pos.create | catalog.manage | purchase.manage, got ' +
       JSON.stringify(requiredPermissions(bump))
   );
 });

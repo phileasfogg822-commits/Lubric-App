@@ -218,9 +218,11 @@ function requiredPermissions(sql) {
       // (`UPDATE products SET stock_qty = COALESCE(stock_qty, 0) + $1 ...`).
       // A POS holder may make exactly that write — any other products
       // UPDATE (price, name, a stock reset) stays catalog-only.
-      // The SET clause is split on commas AFTER parenthesised groups are
-      // removed: COALESCE(stock_qty, 0) carries a comma of its own, and a
-      // naive split would read it as a second assignment.
+      // A purchase receipt moves the same cache the same way (stockIn in
+      // src/lib/stock.ts), so a purchase.manage holder may make exactly
+      // that write too — the invoice itself is purchase.manage's own
+      // feature, and without this its stock-in 403s for the very role
+      // that is meant to receive shipments.
       const setClause = (trimmed.match(/^update\s+"?products"?\s+set\s+(.+?)\s+where\b/) || [])[1];
       let flat = setClause || '';
       let prev;
@@ -229,7 +231,7 @@ function requiredPermissions(sql) {
         setClause &&
         flat.split(',').every((assign) => /^\s*"?stock_qty"?\s*=/.test(assign))
       ) {
-        return [P.POS_CREATE, P.CATALOG_MANAGE];
+        return [P.POS_CREATE, P.CATALOG_MANAGE, P.PURCHASE_MANAGE];
       }
     }
     return WRITE_PERMISSIONS[target] || null;
