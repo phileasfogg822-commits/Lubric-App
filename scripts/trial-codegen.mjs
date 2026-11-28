@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Trial activation-code generator for lubric.app (batch 16).
+ * Trial activation-code generator for lubric.app (batch 16, 1-year
+ * licences since batch 16.1).
  *
  * Run by UMAR ONLY, on his own PC — never on a customer PC, never in the
  * repo's CI. It mints the codes that unlock or extend a customer's trial.
@@ -10,6 +11,16 @@
  *   node scripts/trial-codegen.mjs extend --key ./trial-private-key.pem [--days 7]
  *   node scripts/trial-codegen.mjs unlock --key ./trial-private-key.pem
  *   node scripts/trial-codegen.mjs check --key ./trial-private-key.pem <CODE>
+ *
+ * UNLOCK is a 1-YEAR LICENCE (batch 16.1, 2026-11-28 — not forever):
+ * entering an unlock code sets the licence expiry to max(today, current
+ * expiry) + 365 days, so a trial's remaining days are not lost and a
+ * licence renewed early stacks on top of the time still left. When the
+ * year runs out the app locks to a renew screen (contact grafixers.co.uk)
+ * and a new unlock code renews it for another year. The days byte of an
+ * unlock code is unused (0) — the 'U' type alone means 365 days in the
+ * app (src/lib/trialCore.ts LICENSE_DAYS), so a code minted under batch 16
+ * still verifies and now means 1 year.
  *
  * The private key is an Ed25519 key. KEEP IT SECRET and never commit it:
  * anyone with it can mint unlimited unlock codes. The app only carries the
@@ -24,6 +35,8 @@
  *   nonce (4 random bytes) | Ed25519 signature (64 bytes)
  * over the message "LUBRIC-TRIAL-V1" + type + days + nonce, encoded in
  * Crockford base32 (no I/L/O/U) grouped in 5s with dashes.
+ * The days byte is the extend length; for unlock it is 0 and unused — the
+ * app treats every 'U' code as a 365-day licence (LICENSE_DAYS).
  */
 
 import { generateKeyPairSync, createPrivateKey, createPublicKey, sign, verify, randomBytes } from "node:crypto";
@@ -149,7 +162,7 @@ if (cmd === "keygen") {
     console.log(`(extend code — adds ${days} day${days === 1 ? "" : "s"} from today or from the current expiry, whichever is later; single-use)`);
   } else {
     console.log(mintCode(key, TYPE_UNLOCK, 0));
-    console.log("(unlock code — permanent, trial gone forever; single-use)");
+    console.log("(unlock code — 1-year licence from today or from the current expiry, whichever is later; single-use. When the year ends the app asks to renew via grafixers.co.uk.)");
   }
 } else if (cmd === "check") {
   const keyPath = arg("--key", "./trial-private-key.pem");
@@ -168,7 +181,7 @@ if (cmd === "keygen") {
     const pub = createPublicKey(key);
     const good = verify(null, codeMessage(parsed.type, parsed.days, parsed.nonce), pub, parsed.signature);
     console.log(`code: ${code}`);
-    console.log(`type: ${parsed.type === TYPE_EXTEND ? `extend (${parsed.days} days)` : "unlock (permanent)"}`);
+    console.log(`type: ${parsed.type === TYPE_EXTEND ? `extend (${parsed.days} days)` : "unlock (1 year licence)"}`);
     console.log(good ? "VALID — this code was minted with your key." : "INVALID — signature mismatch (foreign or mistyped code).");
     process.exit(good ? 0 : 1);
   } catch (e) {

@@ -72,6 +72,7 @@ jobs:
           node --experimental-strip-types server/sim_activity_log.js
           node --experimental-strip-types server/sim_trial_codes.js
           node --experimental-strip-types server/sim_trial_licensing.js
+          node --experimental-strip-types server/sim_trial_licence_renewal.js
         shell: pwsh
 
       # tsc + vite build for the web bundle (PWA stays on here — the Tauri

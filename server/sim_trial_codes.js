@@ -4,8 +4,9 @@
  * Codes are Ed25519-signed by Umar only (scripts/trial-codegen.mjs) and
  * verified offline against the public key baked into src/lib/trialCore.ts.
  * Each code is different (4 random nonce bytes) and single-use; an EXTEND
- * code adds days from max(today, current expiry) and an UNLOCK code unlocks
- * forever. This sim drives the REAL trialCore (imported, not copied) and
+ * code adds days from max(today, current expiry) and an UNLOCK code grants
+ * a 1-YEAR LICENCE from max(today, current expiry) (batch 16.1 — not
+ * forever). This sim drives the REAL trialCore (imported, not copied) and
  * cross-checks the REAL generator with a throwaway keypair, so a drift
  * between the generator's codec and the app's codec goes red here.
  *
@@ -137,6 +138,12 @@ check("two generator codes are different (nonce)", () => {
   assert(genExtend !== genUnlock, "codes differ");
   const again = execFileSync("node", ["scripts/trial-codegen.mjs", "extend", "--key", keyPath, "--days", "7"], { cwd: REPO_ROOT, encoding: "utf8" }).split("\n")[0].trim();
   assert(again !== genExtend, "same kind minted twice still differs");
+});
+
+check("generator check command calls an unlock code a 1 year licence", () => {
+  const out = execFileSync("node", ["scripts/trial-codegen.mjs", "check", "--key", keyPath, genUnlock], { cwd: REPO_ROOT, encoding: "utf8" });
+  assert(/unlock \(1 year licence\)/.test(out), `check must say 1 year licence: ${out}`);
+  assert(/VALID/.test(out), "unlock code must verify");
 });
 
 check("generator check command verifies a good code and rejects a flipped one", () => {

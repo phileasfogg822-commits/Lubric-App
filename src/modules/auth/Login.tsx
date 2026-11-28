@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
 import { dbSelect, isTauri } from "../../lib/db";
 import { getRememberedEmails } from "../../lib/loginMemory";
-import { loadTrialState } from "../../lib/trial";
+import { loadTrialState, refreshTrialState } from "../../lib/trial";
+import ActivationCodeForm from "../../components/ActivationCodeForm";
 import type { TrialState } from "../../lib/trialCore";
 import { versionLine } from "../../lib/version";
 
@@ -38,6 +39,13 @@ export default function Login() {
   // trial state by the time this screen renders, so this is a cached read;
   // outside Tauri it stays null and nothing shows.
   const [trial, setTrial] = useState<TrialState | null>(null);
+  // Batch 16.1: the code box on the login screen. A customer who buys
+  // early must not have to wait for the trial to end to unlock — the link
+  // opens the same activation form as the lock screen (same verifier,
+  // same single-use rules). Shown on the Windows build only, while the
+  // app is in trial or licensed (a locked install never reaches login —
+  // the gate shows the lock screen instead).
+  const [showCode, setShowCode] = useState(false);
   useEffect(() => {
     let cancelled = false;
     loadTrialState()
@@ -132,7 +140,30 @@ export default function Login() {
             </div>
           )}
           {trial && trial.status === "unlocked" && (
-            <div style={{ fontSize: "0.72rem", color: "#15803d", marginTop: 6 }}>Licensed</div>
+            <div style={{ fontSize: "0.72rem", color: "#15803d", marginTop: 6 }}>
+              Licensed until {trial.expiryDate}
+            </div>
+          )}
+          {trial && (trial.status === "trial" || trial.status === "unlocked") && (
+            <div style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                onClick={() => setShowCode((v) => !v)}
+                style={{ background: "none", border: "none", color: "#2563eb", fontSize: "0.75rem", cursor: "pointer", textDecoration: "underline" }}
+              >
+                Have an activation code?
+              </button>
+              {showCode && (
+                <div style={{ marginTop: 12, textAlign: "left" }}>
+                  <ActivationCodeForm
+                    onActivated={() => {
+                      setShowCode(false);
+                      refreshTrialState().then(setTrial).catch(() => undefined);
+                    }}
+                  />
+                </div>
+              )}
+            </div>
           )}
         </div>
 

@@ -213,7 +213,8 @@ function SyncLoop() {
  * 7-day clock; the date lives outside the database so a reinstall cannot
  * restart it). An expired or tampered install shows ONLY the lock screen
  * — no login, no setup, no routes — until a valid activation code lands.
- * The lock never deletes data; it only hides the app.
+ * The lock never deletes data; it only hides the app. Batch 16.1: a
+ * 1-year licence that runs out locks the same way, to a renew screen.
  */
 function TrialGate({ children }: { children: ReactNode }) {
   const [trial, setTrial] = useState<TrialState | null>(null);
@@ -244,7 +245,11 @@ function TrialGate({ children }: { children: ReactNode }) {
     };
   }, []);
   if (!trial) return <div style={{ padding: 32, textAlign: "center" }}>Loading...</div>;
-  if (trial.status === "expired" || trial.status === "tampered") {
+  if (
+    trial.status === "expired" ||
+    trial.status === "tampered" ||
+    trial.status === "licence_expired"
+  ) {
     return (
       <TrialLock
         initial={trial}

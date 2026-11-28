@@ -6,12 +6,20 @@
  *   - 7 days from FIRST LAUNCH (not install); login shows "Trial: N days left".
  *   - On expiry (or a turned-back clock) the whole app locks to one screen
  *     with a subscribe message + code box; data is NOT deleted by the lock.
+ *   - Batch 16.1: UNLOCK is a 1-YEAR LICENCE (365 days from max(today,
+ *     current expiry)), not forever. When the licence runs out the app
+ *     locks to a renew screen (contact grafixers.co.uk) with the code box;
+ *     a new unlock code renews for another year. Login shows
+ *     "Licensed until <date>" while licensed, and has a "Have an
+ *     activation code?" link that opens the same code form any time.
  *   - The first date lives OUTSIDE the database (temp file, %PROGRAMDATA%,
  *     registry, log, WebView2 localStorage); the earliest first date wins,
  *     so reinstalling does NOT restart the clock.
- *   - Reinstall DOES wipe the business data: the NSIS uninstaller removes
- *     the app data dir (POSTUNINSTALL hook only — install/upgrade never
- *     runs it). The trial clock survives the reinstall.
+ *   - Reinstall DOES wipe the business data unless the user asks to keep
+ *     it: the NSIS uninstaller asks once (Yes/No, wipe is the default)
+ *     and removes the app data dir only when the answer is No
+ *     (POSTUNINSTALL hook only — install/upgrade never runs it). The
+ *     trial clock survives the reinstall either way.
  *   - The trial applies ONLY to the Windows Tauri build: every trial path
  *     is gated on isTauri(), so the VPS web app, ?demo=1 and the portfolio
  *     demo links never see it.
@@ -113,15 +121,33 @@ check("extend after expiry counts from today, not the old expiry", () => {
   assertEq(r.state.expiryDate, "2026-12-13", "expiry counts from today");
 });
 
-check("valid unlock code unlocks forever (still unlocked months later)", () => {
+check("valid unlock code grants a 1-year licence from the later of today / current expiry", () => {
   const { code, pubHex } = mintTestCode(CODE_TYPE_UNLOCK, 0);
   const s0 = computeTrialState(marker("2026-11-28", "2026-12-04"), "2026-12-04");
   const r = applyCodeWithKey(s0, code, "2026-12-04", pubHex);
   assert(r.ok, "must accept");
   assertEq(r.kind, "unlock", "kind");
+  assertEq(r.daysAdded, 365, "licence is 365 days");
+  // Current expiry was 2026-12-05 (trial) — the licence stacks on top of
+  // it, so the trial's remaining day is not lost.
+  assertEq(r.state.expiryDate, "2027-12-05", "expiry = old expiry + 365");
   assertEq(r.state.status, "unlocked", "unlocked");
-  const later = computeTrialState(marker("2026-11-28", "2027-06-01", { unlocked: true, used: r.state.used }), "2027-06-01");
-  assertEq(later.status, "unlocked", "still unlocked months later");
+  assert(r.state.unlocked, "licence flag set");
+  // Still licensed 11 months later, inside the year…
+  const later = computeTrialState(marker("2026-11-28", "2027-11-01", { expiry: "2027-12-05", unlocked: true, used: r.state.used }), "2027-11-01");
+  assertEq(later.status, "unlocked", "still licensed inside the year");
+  // …and locked to the renew screen the day the year runs out.
+  const over = computeTrialState(marker("2026-11-28", "2027-12-05", { expiry: "2027-12-05", unlocked: true, used: r.state.used }), "2027-12-05");
+  assertEq(over.status, "licence_expired", "licence_expired on the expiry day");
+});
+
+check("unlock after expiry counts the year from today, not the old expiry", () => {
+  const { code, pubHex } = mintTestCode(CODE_TYPE_UNLOCK, 0);
+  const s0 = computeTrialState(marker("2026-11-28", "2026-12-04"), "2026-12-06");
+  assertEq(s0.status, "expired", "expired first");
+  const r = applyCodeWithKey(s0, code, "2026-12-06", pubHex);
+  assert(r.ok, "must accept");
+  assertEq(r.state.expiryDate, "2027-12-06", "year counts from today");
 });
 
 check("a used code is rejected the second time", () => {
@@ -134,7 +160,7 @@ check("a used code is rejected the second time", () => {
   assert(/already been used/.test(r2.reason ?? ""), `reason: ${r2.reason}`);
 });
 
-check("an extend code cannot unlock, and an unlock code cannot extend", () => {
+check("an extend code cannot unlock, and an unlock code sets a 1-year expiry", () => {
   const e = mintTestCode(CODE_TYPE_EXTEND, 7);
   const u = mintTestCode(CODE_TYPE_UNLOCK, 0);
   const s0 = computeTrialState(marker("2026-11-28", "2026-12-04"), "2026-12-04");
@@ -143,7 +169,7 @@ check("an extend code cannot unlock, and an unlock code cannot extend", () => {
   assert(!r1.state.unlocked, "extend does not unlock");
   const r2 = applyCodeWithKey(s0, u.code, "2026-12-04", u.pubHex);
   assertEq(r2.kind, "unlock", "unlock code unlocks");
-  assertEq(r2.state.expiryDate, "2026-12-05", "unlock does not move the expiry");
+  assertEq(r2.state.expiryDate, "2027-12-05", "unlock sets expiry to old expiry + 365");
 });
 
 // ── markers: earliest first wins, latest last-seen wins ────────────────────
@@ -212,13 +238,18 @@ check("reinstall with surviving markers resumes the ORIGINAL clock (no fresh tri
   assertEq(s.daysLeft, 0, "no fresh days");
 });
 
-check("reinstall wipes the business data: NSIS POSTUNINSTALL removes the app data dirs", () => {
+check("reinstall wipes the business data ONLY when the user says so: NSIS asks first, wipe is the default", () => {
   const conf = read("src-tauri/tauri.conf.json");
   assert(/"installerHooks"\s*:\s*"nsis-hooks\.nsh"/.test(conf), "tauri.conf wires installerHooks");
   const hooks = read("src-tauri/nsis-hooks.nsh");
+  assert(/!macro NSIS_HOOK_PREUNINSTALL/.test(hooks), "PREUNINSTALL hook present");
+  assert(/MessageBox MB_YESNO.*Keep my shop data/.test(hooks), "uninstall asks whether to keep the data");
+  assert(/StrCpy \$KEEP_DATA "0"/.test(hooks), "wipe is the default (KEEP_DATA starts 0)");
+  assert(/IfSilent lubric_keepdata_done/.test(hooks), "a silent uninstall never prompts — wipe default holds");
   assert(/!macro NSIS_HOOK_POSTUNINSTALL/.test(hooks), "POSTUNINSTALL hook present");
-  assert(/RMDir \/r "\$APPDATA\\app\.lubric\.desktop"/.test(hooks), "roaming app data removed");
-  assert(/RMDir \/r "\$LOCALAPPDATA\\app\.lubric\.desktop"/.test(hooks), "local app data removed");
+  assert(/StrCmp \$KEEP_DATA "1" lubric_keepdata_skip/.test(hooks), "wipe is skipped when the user asked to keep the data");
+  assert(/RMDir \/r "\$APPDATA\\app\.lubric\.desktop"/.test(hooks), "roaming app data removed on wipe");
+  assert(/RMDir \/r "\$LOCALAPPDATA\\app\.lubric\.desktop"/.test(hooks), "local app data removed on wipe");
   assert(!/!macro NSIS_HOOK_(PRE|POST)INSTALL/.test(hooks), "no install-time hook — upgrade never wipes");
   const db = read("src/lib/db.ts");
   assert(/load\("sqlite:lubric\.db"\)/.test(db), "database is the relative lubric.db (app data dir)");
@@ -250,19 +281,23 @@ check("trial is inert outside Tauri: trial.ts returns inactive without isTauri()
   assert(/import \{ isTauri \} from "\.\/db"/.test(t), "gated on the shared isTauri()");
 });
 
-check("App gate locks the whole app on expired/tampered, passes everything else", () => {
+check("App gate locks the whole app on expired/tampered/licence_expired, passes everything else", () => {
   const app = read("src/App.tsx");
   assert(/TrialGate/.test(app), "TrialGate exists");
-  assert(/trial\.status === "expired" \|\| trial\.status === "tampered"/.test(app), "locks on expired/tampered");
+  assert(/trial\.status === "expired"\s*\|\|\s*trial\.status === "tampered"\s*\|\|\s*trial\.status === "licence_expired"/.test(app), "locks on expired/tampered/licence_expired");
   assert(/<TrialLock/.test(app), "lock screen rendered");
   assert(/<TrialGate>\s*<Routes>/.test(app), "gate wraps every route");
 });
 
-check("login shows days-left only in trial, licensed only when unlocked", () => {
+check("login shows days-left in trial, 'Licensed until <date>' when licensed, and the code link", () => {
   const login = read("src/modules/auth/Login.tsx");
   assert(/trial\.status === "trial"/.test(login), "trial line gated on trial status");
   assert(/Trial: \{trial\.daysLeft\} day/.test(login), "days-left line");
   assert(/trial\.status === "unlocked"/.test(login), "licensed line gated on unlocked");
+  assert(/Licensed until \{trial\.expiryDate\}/.test(login), "licensed line shows the licence end date");
+  assert(/Have an activation code\?/.test(login), "code-box link on the login screen");
+  assert(/ActivationCodeForm/.test(login), "login uses the shared activation form");
+  assert(/refreshTrialState\(\)\.then\(setTrial\)/.test(login), "login refreshes the trial line after activation");
 });
 
 check("VPS web app, demo auto-login and server have no trial references", () => {

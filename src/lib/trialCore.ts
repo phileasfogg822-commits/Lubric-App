@@ -22,6 +22,14 @@
  * a second time. A tampered code fails the signature; a code signed by any
  * other key fails the signature too.
  *
+ * Batch 16.1 (2026-11-28): UNLOCK is a 1-YEAR LICENCE, not forever. An
+ * unlock code sets the licence expiry to max(today, current expiry) + 365
+ * days (same max-rule as extend, so a trial's remaining days are not
+ * lost). When the licence runs out the app locks to a renew screen
+ * ("contact grafixers.co.uk") with the code box. The days byte of an
+ * unlock code is unused (0); the 'U' type alone means 365 days — so an
+ * unlock code minted under batch 16 still verifies, and now means 1 year.
+ *
  * This file is deliberately erasable TypeScript (type annotations only, no
  * enums / namespaces / parameter properties) so the server sims can import
  * the REAL code with `node --experimental-strip-types`.
@@ -36,6 +44,9 @@ export const TRIAL_PUBLIC_KEY_HEX =
 /** Trial length in days, from first launch. */
 export const TRIAL_DAYS = 7;
 
+/** Licence length in days granted by an unlock code (batch 16.1). */
+export const LICENSE_DAYS = 365;
+
 /** Domain separator signed into every code. */
 export const TRIAL_CODE_DOMAIN = "LUBRIC-TRIAL-V1";
 
@@ -47,14 +58,15 @@ export interface TrialMarker {
   first: string | null; // YYYY-MM-DD of first launch, or null if unknown
   lastSeen: string | null; // YYYY-MM-DD of the latest launch seen
   expiry: string | null; // explicit expiry (YYYY-MM-DD) after an extension
-  unlocked: boolean; // a permanent unlock code was applied
+  unlocked: boolean; // an unlock code was applied: a 1-year licence (batch 16.1)
   used: string[]; // SHA-512 hex of each spent activation code
 }
 
 export type TrialStatus =
   | "trial" // inside the trial window
   | "expired" // trial window over, no valid code entered
-  | "unlocked" // permanent unlock code applied
+  | "unlocked" // inside a 1-year licence (unlock code applied, expiry in future)
+  | "licence_expired" // the 1-year licence ran out — renew via grafixers.co.uk
   | "tampered" // the clock moved backwards past the last-seen date
   | "inactive"; // not a Tauri build — the trial does not apply
 
@@ -314,7 +326,10 @@ export function computeTrialState(marker: TrialMarker | null, today: string): Tr
   const daysLeft = diffDays(today, expiryDate);
   let status: TrialStatus;
   if (tampered) status = "tampered";
-  else if (marker.unlocked) status = "unlocked";
+  // Batch 16.1: an unlock code is a 1-year licence, not forever. Inside
+  // the licence the app is "unlocked"; past its expiry it locks to the
+  // renew screen (status "licence_expired"), not the trial screen.
+  else if (marker.unlocked) status = daysLeft > 0 ? "unlocked" : "licence_expired";
   else if (daysLeft <= 0) status = "expired";
   else status = "trial";
   return {
@@ -351,9 +366,10 @@ export interface ActivationResult {
 /**
  * Apply an activation code to a trial state. Extend counts from
  * max(today, current expiry) — a code entered mid-trial adds on top of the
- * time still left, never behind it. Unlock is permanent. Reuse is rejected
- * by the spent-code list, and a code that fails the signature is rejected
- * before anything changes.
+ * time still left, never behind it. Unlock is a 1-YEAR LICENCE (batch
+ * 16.1): it counts the same way, max(today, current expiry) + 365 days.
+ * Reuse is rejected by the spent-code list, and a code that fails the
+ * signature is rejected before anything changes.
  */
 export function applyCode(
   state: TrialState,
@@ -385,12 +401,21 @@ export function applyCodeWithKey(
   }
   const used = [...state.used, id];
   if (verified.type === CODE_TYPE_UNLOCK) {
+    // Batch 16.1: a 1-year licence from max(today, current expiry) — a
+    // trial's remaining days are not lost, and a licence renewed early
+    // stacks on top of the time still left, exactly like extend.
+    const base =
+      !state.expiryDate || state.expiryDate < today ? today : state.expiryDate;
+    const expiryDate = addDays(base, LICENSE_DAYS);
     return {
       ok: true,
       kind: "unlock",
+      daysAdded: LICENSE_DAYS,
       state: {
         ...state,
         status: "unlocked",
+        expiryDate,
+        daysLeft: diffDays(today, expiryDate),
         unlocked: true,
         tampered: false,
         used,
@@ -403,7 +428,9 @@ export function applyCodeWithKey(
   const expiryDate = addDays(base, days);
   const next: TrialState = {
     ...state,
-    status: "trial",
+    // Batch 16.1: extending inside a licence keeps the app licensed —
+    // the status follows the licence flag, not the code that was entered.
+    status: state.unlocked ? "unlocked" : "trial",
     expiryDate,
     daysLeft: diffDays(today, expiryDate),
     tampered: false,
