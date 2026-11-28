@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { query } from './db.js';
 import pool from './db.js';
+import { loadAnnouncements } from './announcements.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPDATES_DIR = process.env.UPDATES_DIR || path.join(__dirname, 'updates');
@@ -346,6 +347,19 @@ app.get('/api/health', async (req, res) => {
   } catch (err) {
     res.status(503).json({ status: 'error', db: 'disconnected', error: err.message });
   }
+});
+
+// ─── Announcements (Batch 17) ──────────────────────────────────────────
+// Public feed for the Windows app's in-app banner: GET /api/announcements.
+// No auth, no identity — any caller may read it, exactly like /api/health.
+// Reads announcements.json from the updates directory (the same directory
+// that holds android.json: mounted at /app/updates in the API container,
+// i.e. /opt/apps/app9/updates/ on the VPS host). Umar edits that one file;
+// no rebuild, no restart — it is read on every request. Missing or bad
+// file yields { messages: [] }, never an error.
+app.get('/api/announcements', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(loadAnnouncements(UPDATES_DIR));
 });
 
 // ─── Auth: Login ────────────────────────────────────────────────

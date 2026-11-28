@@ -9,7 +9,8 @@
  * This sim proves, with red-before/green-after on the previous commit:
  *   RED  (HEAD~1, the batch-4 commit): no version.ts, no Version page, no
  *        /version route, and the login screen has no version line.
- *   GREEN (working tree + built dist): version 0.1.1 is bumped everywhere,
+ *   GREEN (working tree + built dist): the current version (package.json)
+ *        is bumped everywhere — 0.1.1 for batch 5, 0.1.2 from batch 17 on,
  *        the login screen renders versionLine() under the lubric.app
  *        subtitle, the Version page shows every baked field, the sidebar
  *        offers it to every signed-in user, and the built bundle contains
@@ -99,20 +100,25 @@ check('RED: previous commit has no /version route or sidebar entry', () => {
   assert(!oldLayout.includes('"/version"'), `${RED_REF} Layout.tsx already has a Version entry`);
 });
 
-// ── GREEN: version bumped to 0.1.1 everywhere ───────────────────────────────
-check('GREEN: version is 0.1.1 in package.json, tauri.conf.json, Cargo.toml', () => {
-  assert(JSON.parse(read('package.json')).version === '0.1.1', 'package.json is not 0.1.1');
-  assert(JSON.parse(read('src-tauri/tauri.conf.json')).version === '0.1.1', 'tauri.conf.json is not 0.1.1');
-  assert(read('src-tauri/Cargo.toml').includes('version = "0.1.1"'), 'Cargo.toml is not 0.1.1');
+// ── GREEN: current version bumped everywhere ─────────────────────────────────
+// Batch 17 (2026-11-28): the version is no longer pinned to 0.1.1 — the
+// updater compares the feed version against the installed one, so every
+// release batch bumps the patch version (0.1.2 here). The expected version
+// is read from package.json, and the other three files must agree with it.
+const EXPECTED_VERSION = JSON.parse(read('package.json')).version;
+assert(/^\d+\.\d+\.\d+$/.test(EXPECTED_VERSION), `package.json version is not semver: ${EXPECTED_VERSION}`);
+check(`GREEN: version is ${EXPECTED_VERSION} in package.json, tauri.conf.json, Cargo.toml`, () => {
+  assert(JSON.parse(read('src-tauri/tauri.conf.json')).version === EXPECTED_VERSION, `tauri.conf.json is not ${EXPECTED_VERSION}`);
+  assert(read('src-tauri/Cargo.toml').includes(`version = "${EXPECTED_VERSION}"`), `Cargo.toml is not ${EXPECTED_VERSION}`);
 });
-check('GREEN: Cargo.lock pins the app itself at 0.1.1', () => {
+check(`GREEN: Cargo.lock pins the app itself at ${EXPECTED_VERSION}`, () => {
   // \r?\n: on the Windows runner, checkout converts text files to CRLF,
   // so the entry reads `name = "lubric-app"\r\nversion = ...` and a
   // \n-only regex misses it (CI run 45479998849). Never rewrite the lock
   // file's line endings — tolerate them here instead.
   const lock = read('src-tauri/Cargo.lock');
   const m = lock.match(/name = "lubric-app"\r?\nversion = "([^"]+)"/);
-  assert(m && m[1] === '0.1.1', `lubric-app in Cargo.lock is ${m ? m[1] : 'missing'}`);
+  assert(m && m[1] === EXPECTED_VERSION, `lubric-app in Cargo.lock is ${m ? m[1] : 'missing'}`);
 });
 
 // The date helpers are TypeScript, and formatBuildDate reads the
@@ -199,13 +205,13 @@ function mainBundle() {
   assert(files.length > 0, 'no built index-*.js bundle in dist/assets');
   for (const f of files) {
     const text = readFileSync(new URL(f, dir), 'utf8');
-    if (text.includes('0.1.1')) return text;
+    if (text.includes(EXPECTED_VERSION)) return text;
   }
-  throw new Error('no built bundle contains the baked version 0.1.1');
+  throw new Error(`no built bundle contains the baked version ${EXPECTED_VERSION}`);
 }
 const BUNDLE = mainBundle();
-check('GREEN: built bundle contains the baked version 0.1.1', () => {
-  assert(BUNDLE.includes('"0.1.1"') || BUNDLE.includes('0.1.1'), 'bundle lacks 0.1.1');
+check(`GREEN: built bundle contains the baked version ${EXPECTED_VERSION}`, () => {
+  assert(BUNDLE.includes(`"${EXPECTED_VERSION}"`) || BUNDLE.includes(EXPECTED_VERSION), `bundle lacks ${EXPECTED_VERSION}`);
 });
 check('GREEN: built bundle contains the head commit SHA (full + short)', () => {
   assert(BUNDLE.includes(HEAD_SHA), `bundle lacks full head SHA ${HEAD_SHA}`);
@@ -230,5 +236,5 @@ check('GREEN: built bundle contains a recent ISO build date', () => {
 });
 
 console.log(`\n${ok}/${total} checks passed${failed ? ` — ${failed} FAILED` : ''}`);
-console.log(`head ${HEAD_SHORT} (${HEAD_SHA}) — login will show: v0.1.1 • build ${HEAD_SHORT} • <build date>`);
+console.log(`head ${HEAD_SHORT} (${HEAD_SHA}) — login will show: v${EXPECTED_VERSION} • build ${HEAD_SHORT} • <build date>`);
 if (failed) process.exit(1);

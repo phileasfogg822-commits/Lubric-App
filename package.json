@@ -1,6 +1,6 @@
 {
   "name": "lubric-app",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -34,7 +34,9 @@
     "@tailwindcss/vite": "^4.1.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/cli": "^2.10.0",
+    "@tauri-apps/plugin-process": "^2.4.0",
     "@tauri-apps/plugin-sql": "^2.0.0",
+    "@tauri-apps/plugin-updater": "^2.14.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",

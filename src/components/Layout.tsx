@@ -1,9 +1,12 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { isTauri } from "../lib/db";
 import { isAdminRole, parsePermissions } from "../lib/permissions";
 import { useConfigMap, useFlagRows, useBranding } from "../lib/useConfigFlags";
 import { moduleEnabled, pickFlag } from "../lib/configRules";
 import { NotificationBell } from "./NotificationBell";
+import AnnouncementsBanner from "./AnnouncementsBanner";
+import UpdatePrompt from "./UpdatePrompt";
 import ShopSelector from "./ShopSelector";
 
 /**
@@ -188,6 +191,15 @@ export default function Layout() {
       </aside>
 
       <main style={{ flex: 1, overflow: "auto", background: "#f1f5f9" }}>
+        {/* Batch 17: announcements + one-click updates, Tauri Windows only.
+            The web app, ?demo=1 and the portfolio demos render neither and
+            fetch nothing — both components gate on isTauri() themselves too. */}
+        {isTauri() ? (
+          <>
+            <AnnouncementsBanner />
+            <UpdatePrompt />
+          </>
+        ) : null}
         <Outlet />
       </main>
     </div>

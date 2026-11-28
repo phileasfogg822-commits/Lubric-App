@@ -17,6 +17,13 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        // Batch 17 (2026-11-28): one-click in-app updates. The updater
+        // plugin checks the GitHub Releases feed, verifies the minisign
+        // signature against the public key in tauri.conf.json, and installs
+        // only when the user taps "Update now"; the process plugin restarts
+        // the app into the new version. Both are inert until that tap.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         // Batch 6 (2026-11-25): the sql plugin opens the database as a pool
         // of up to ten connections, which splits a JS-driven BEGIN..COMMIT
         // across them. use_single_connection_pool swaps that pool for one

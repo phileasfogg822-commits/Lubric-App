@@ -73,6 +73,8 @@ jobs:
           node --experimental-strip-types server/sim_trial_codes.js
           node --experimental-strip-types server/sim_trial_licensing.js
           node --experimental-strip-types server/sim_trial_licence_renewal.js
+          node --experimental-strip-types server/sim_announcements.js
+          node --experimental-strip-types server/sim_updater_feed.js
         shell: pwsh
 
       # tsc + vite build for the web bundle (PWA stays on here — the Tauri
@@ -99,8 +101,25 @@ jobs:
         run: node server/sim_version_display.js
         shell: pwsh
 
+      # Batch 17: the signed updater build needs TAURI_SIGNING_PRIVATE_KEY,
+      # and the build FAILS if createUpdaterArtifacts is on without the key
+      # — so the base config leaves artifacts off, and the overlay config
+      # (src-tauri/tauri.updater.conf.json) turns them on ONLY when the
+      # secret exists. Before Umar adds the secret this is a plain build
+      # and CI stays green; after, the same step also signs the updater
+      # artifacts for the release step below. An empty secret is falsy in
+      # PowerShell, so the plain branch runs; the empty env var is never
+      # read by the bundler when artifacts are off.
       - name: Build Tauri NSIS installer
-        run: npm run tauri:build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+            npm run tauri:build -- --config src-tauri/tauri.updater.conf.json
+          } else {
+            npm run tauri:build
+          }
+        shell: pwsh
 
       # The installer name carries product + version, e.g.
       # lubric.app_0.1.1_x64-setup.exe — record its hash so the delivered
@@ -116,3 +135,43 @@ jobs:
           name: lubric-windows-installer
           path: src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
+
+      # Batch 17: publish the updater feed to the rolling `windows-latest`
+      # GitHub Release — installed apps read latest.json from there (see
+      # src/lib/updater.ts UPDATER_FEED_URL). Skipped entirely until Umar
+      # adds the TAURI_SIGNING_PRIVATE_KEY repository secret (Settings →
+      # Secrets and variables → Actions): the secret holds the CONTENTS of
+      # the updater private key file (delivered to Umar privately, never in
+      # the repo). The step fails loudly if the signed build produced no
+      # .sig file, so a broken signing setup is visible instead of silently
+      # shipping an unsigned feed. The release exe is the same build the
+      # artifact step above uploads; latest.json lives in RUNNER_TEMP so it
+      # never pollutes the tree.
+      - name: Publish updater release
+        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
+          if (-not $exe) { Write-Error "no NSIS installer found in src-tauri/target/release/bundle/nsis"; exit 1 }
+          $sigFile = "$($exe.FullName).sig"
+          if (-not (Test-Path $sigFile)) { Write-Error "no .sig file next to $($exe.Name) — the signed build did not produce updater artifacts"; exit 1 }
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $notes = git log -1 --format=%s
+          $pubDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+          $signature = (Get-Content $sigFile -Raw).Trim()
+          $latest = @{
+            version = $version
+            notes = $notes
+            pub_date = $pubDate
+            platforms = @{ "windows-x86_64" = @{ url = "https://github.com/phileasfogg822-commits/Lubric-App/releases/download/windows-latest/$($exe.Name)"; signature = $signature } }
+          } | ConvertTo-Json -Depth 5
+          $latestPath = Join-Path $env:RUNNER_TEMP "latest.json"
+          Set-Content -Path $latestPath -Value $latest -Encoding utf8
+          gh release view windows-latest --repo phileasfogg822-commits/Lubric-App 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create windows-latest --repo phileasfogg822-commits/Lubric-App --title "Windows latest" --notes "Rolling release for the lubric.app in-app updater. Do not delete — installed apps read latest.json from here."
+          }
+          gh release upload windows-latest $exe.FullName $latestPath --clobber --repo phileasfogg822-commits/Lubric-App
+          Write-Host "Updater feed published: v$version ($($exe.Name))"
+        shell: pwsh
