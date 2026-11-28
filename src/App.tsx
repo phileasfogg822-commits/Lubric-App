@@ -4,6 +4,9 @@ import { useAuth, AuthProvider } from "./lib/auth";
 import { isAdminRole, parsePermissions, firstAllowedRoute } from "./lib/permissions";
 import { useConfigMap, useFlagRows, useBranding } from "./lib/useConfigFlags";
 import { isCapacitor, isTauri, getLocalDb, dbSelect } from "./lib/db";
+import { loadTrialState, refreshTrialState } from "./lib/trial";
+import type { TrialState } from "./lib/trialCore";
+import TrialLock from "./components/TrialLock";
 import { startSyncLoop } from "./lib/sync";
 import { moduleEnabled, pickFlag } from "./lib/configRules";
 import Layout from "./components/Layout";
@@ -201,12 +204,66 @@ function SyncLoop() {
   return null;
 }
 
+/**
+ * Batch 16 (2026-11-28): the trial gate. Windows standalone only — the
+ * trial module returns "inactive" everywhere else, so the VPS web app,
+ * the ?demo=1 auto-login and the portfolio demo links never see it.
+ *
+ * On a Tauri launch the trial clock is read once (first launch starts the
+ * 7-day clock; the date lives outside the database so a reinstall cannot
+ * restart it). An expired or tampered install shows ONLY the lock screen
+ * — no login, no setup, no routes — until a valid activation code lands.
+ * The lock never deletes data; it only hides the app.
+ */
+function TrialGate({ children }: { children: ReactNode }) {
+  const [trial, setTrial] = useState<TrialState | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadTrialState()
+      .then((s) => {
+        if (!cancelled) setTrial(s);
+      })
+      .catch(() => {
+        // Trial unreadable — fail open to the login screen rather than
+        // bricking the till; the gate re-checks on the next launch.
+        if (!cancelled) {
+          setTrial({
+            status: "inactive",
+            firstDate: null,
+            expiryDate: null,
+            daysLeft: 0,
+            tampered: false,
+            unlocked: false,
+            used: [],
+            lastSeen: null,
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!trial) return <div style={{ padding: 32, textAlign: "center" }}>Loading...</div>;
+  if (trial.status === "expired" || trial.status === "tampered") {
+    return (
+      <TrialLock
+        initial={trial}
+        onActivated={() => {
+          refreshTrialState().then(setTrial).catch(() => undefined);
+        }}
+      />
+    );
+  }
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <ErrorBoundary>
         <Branding />
         <SyncLoop />
+        <TrialGate>
         <Routes>
           <Route path="/login" element={<FirstRunGate><RedirectIfAuth><Login /></RedirectIfAuth></FirstRunGate>} />
           <Route path="/setup" element={<FirstRunSetup />} />
@@ -262,6 +319,7 @@ export default function App() {
             <Route path="*" element={<LandingRedirect />} />
           </Route>
         </Routes>
+        </TrialGate>
       </ErrorBoundary>
     </AuthProvider>
   );

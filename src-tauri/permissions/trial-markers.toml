@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-trial-markers"
+description = "Allow the trial_markers_read / trial_markers_write commands, which keep the 7-day trial clock in the temp file, %PROGRAMDATA%, the registry and the log so a reinstall cannot restart the trial"
+commands.allow = ["trial_markers_read", "trial_markers_write"]

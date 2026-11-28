@@ -4,6 +4,7 @@
 use tauri::Manager;
 
 mod db_pool;
+mod trial_markers;
 
 pub fn run() {
     tauri::Builder::default()
@@ -22,7 +23,15 @@ pub fn run() {
         // connection right after Database.load (see db_pool.rs); the
         // frontend invokes it from getLocal(), and capabilities/default.json
         // grants it to the main window.
-        .invoke_handler(tauri::generate_handler![db_pool::use_single_connection_pool])
+        // Batch 16 (2026-11-28): the trial clock lives outside the database
+        // (temp file, %PROGRAMDATA%, registry, log) so a reinstall cannot
+        // restart it — see src-tauri/src/trial_markers.rs. The capability
+        // grant is allow-trial-markers in capabilities/default.json.
+        .invoke_handler(tauri::generate_handler![
+            db_pool::use_single_connection_pool,
+            trial_markers::trial_markers_read,
+            trial_markers::trial_markers_write
+        ])
         .setup(|_app| {
             // No startup work here: the frontend owns the local database —
             // getLocal() in src/lib/db.ts runs ensureLocalSchema (tables,

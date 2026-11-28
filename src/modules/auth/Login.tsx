@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
 import { dbSelect, isTauri } from "../../lib/db";
 import { getRememberedEmails } from "../../lib/loginMemory";
+import { loadTrialState } from "../../lib/trial";
+import type { TrialState } from "../../lib/trialCore";
 import { versionLine } from "../../lib/version";
 
 /**
@@ -32,6 +34,21 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<{ email: string; name: string }[]>([]);
   const [picked, setPicked] = useState<string | null>(null);
+  // Batch 16: the trial countdown. The gate (App.tsx) already loaded the
+  // trial state by the time this screen renders, so this is a cached read;
+  // outside Tauri it stays null and nothing shows.
+  const [trial, setTrial] = useState<TrialState | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadTrialState()
+      .then((s) => {
+        if (!cancelled) setTrial(s);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const passwordRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
 
@@ -108,6 +125,15 @@ export default function Login() {
               shipped version 0.1.0 and showed nothing, so a bug report could
               not say which build it came from). */}
           <div style={{ fontSize: "0.72rem", color: "#94a3b8", marginTop: 4 }}>{versionLine()}</div>
+          {/* Batch 16: trial countdown on the Windows build only. */}
+          {trial && trial.status === "trial" && (
+            <div style={{ fontSize: "0.75rem", color: "#b45309", fontWeight: 700, marginTop: 6 }}>
+              Trial: {trial.daysLeft} day{trial.daysLeft === 1 ? "" : "s"} left
+            </div>
+          )}
+          {trial && trial.status === "unlocked" && (
+            <div style={{ fontSize: "0.72rem", color: "#15803d", marginTop: 6 }}>Licensed</div>
+          )}
         </div>
 
         {users.length > 0 && (
