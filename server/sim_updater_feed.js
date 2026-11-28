@@ -220,5 +220,29 @@ check("workflow: release step is secret-gated and publishes the feed", () => {
   assert(wf.includes("sim_updater_feed.js"), "updater sim not in the gate");
 });
 
+// ── JS/Rust Tauri version alignment ───────────────────────────────────────
+// CI 46142127144 (2026-11-28): the Tauri CLI refuses to build when the JS
+// @tauri-apps/api minor differs from the Rust `tauri` crate minor —
+// "Found version mismatched Tauri packages" — and it fails in ~3 seconds,
+// before any compilation. The batch-17 `npm install` had floated the root
+// api to 2.12.5 (the new plugins want ^2.12.0) while Cargo.lock still pins
+// tauri 2.11.5. The fix: the ROOT api stays pinned to the 2.11 line
+// (package.json: "2.11.1") and the plugins get their own nested 2.13 copy
+// under node_modules/@tauri-apps/plugin-*/node_modules — npm nests it
+// automatically. When the Rust tauri is next bumped (cargo refreshes the
+// lock on CI), this pin must move with it.
+check("versions: root @tauri-apps/api minor matches Rust tauri minor in Cargo.lock", () => {
+  const lock = JSON.parse(read("package-lock.json"));
+  const jsApi = lock.packages["node_modules/@tauri-apps/api"].version;
+  const cargoLock = read("src-tauri/Cargo.lock");
+  const m = cargoLock.match(/name = "tauri"\nversion = "([^"]+)"/);
+  assert(m, "tauri entry not found in Cargo.lock");
+  const rustTauri = m[1];
+  const minor = (v) => v.split(".").slice(0, 2).join(".");
+  assertEq(minor(jsApi), minor(rustTauri), `JS @tauri-apps/api ${jsApi} minor must equal Rust tauri ${rustTauri} minor`);
+  const pkg = JSON.parse(read("package.json"));
+  assertEq(pkg.devDependencies["@tauri-apps/api"], jsApi, "package.json must pin the exact root api version (no ^ range — npm would float it past the Rust minor)");
+});
+
 console.log(`\n${ok}/${total} checks passed${failed ? ` — ${failed} FAILED` : ""}`);
 if (failed) process.exit(1);
