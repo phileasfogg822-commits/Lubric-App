@@ -235,7 +235,10 @@ check("versions: root @tauri-apps/api minor matches Rust tauri minor in Cargo.lo
   const lock = JSON.parse(read("package-lock.json"));
   const jsApi = lock.packages["node_modules/@tauri-apps/api"].version;
   const cargoLock = read("src-tauri/Cargo.lock");
-  const m = cargoLock.match(/name = "tauri"\nversion = "([^"]+)"/);
+  // \r?\n, not \n: .gitattributes says `* text=auto`, so the Windows
+  // runner checks Cargo.lock out with CRLF endings and a bare \n never
+  // matches there (CI 46144514769 failed the gate on exactly this).
+  const m = cargoLock.match(/name = "tauri"\r?\nversion = "([^"]+)"/);
   assert(m, "tauri entry not found in Cargo.lock");
   const rustTauri = m[1];
   const minor = (v) => v.split(".").slice(0, 2).join(".");
