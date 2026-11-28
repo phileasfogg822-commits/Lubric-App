@@ -13,6 +13,13 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    # Batch 17: the signing key rides on a JOB-level env var, not in an
+    # `if:` — GitHub's expression parser rejects `secrets` inside `if:`
+    # ("Unrecognized named-value: 'secrets'") and the whole run fails
+    # before any job starts. A job env CAN read secrets, and a step `if:`
+    # CAN read env, so the gate is `env.TAURI_SIGNING_PRIVATE_KEY != ''`.
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     steps:
       # Full history, not the default shallow checkout: the version-display
       # sim proves its red-before case against the commit BEFORE batch 5,
@@ -111,8 +118,6 @@ jobs:
       # PowerShell, so the plain branch runs; the empty env var is never
       # read by the bundler when artifacts are off.
       - name: Build Tauri NSIS installer
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           if ($env:TAURI_SIGNING_PRIVATE_KEY) {
             npm run tauri:build -- --config src-tauri/tauri.updater.conf.json
@@ -148,7 +153,7 @@ jobs:
       # artifact step above uploads; latest.json lives in RUNNER_TEMP so it
       # never pollutes the tree.
       - name: Publish updater release
-        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        if: ${{ env.TAURI_SIGNING_PRIVATE_KEY != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

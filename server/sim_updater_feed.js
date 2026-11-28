@@ -207,7 +207,9 @@ check("update prompt: install happens only from the user's tap", () => {
 check("workflow: release step is secret-gated and publishes the feed", () => {
   const wf = read(".github/workflows/windows-app.yml");
   assert(wf.includes("Publish updater release"), "release step missing");
-  assert(wf.includes("secrets.TAURI_SIGNING_PRIVATE_KEY != ''"), "release step must skip when the signing secret is absent");
+  assert(wf.includes("TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"), "signing secret must be hoisted into a job-level env var (secrets is rejected inside if:)");
+  assert(wf.includes("if: ${{ env.TAURI_SIGNING_PRIVATE_KEY != '' }}"), "release step must skip via the env var when the signing secret is absent");
+  assert(!wf.includes("if: ${{ secrets."), "no step if: may reference secrets directly — GitHub rejects the whole workflow file");
   assert(wf.includes("--config src-tauri/tauri.updater.conf.json"), "signed build must use the updater overlay config");
   assert(wf.includes("TAURI_SIGNING_PRIVATE_KEY"), "build must receive the signing key from the secret");
   assert(wf.includes("gh release upload"), "release step must upload to GitHub Releases");
